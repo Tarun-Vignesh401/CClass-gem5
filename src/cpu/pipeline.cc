@@ -3,26 +3,26 @@
 
 #include <algorithm>
 
-#include "cpu/minor/decode.hh"
-#include "cpu/minor/execute.hh"
+//#include "cpu/minor/decode.hh"
+//#include "cpu/minor/execute.hh"
 #include "cpu/minor/fetch1.hh"
-#include "cpu/minor/fetch2.hh"
-#include "debug/Drain.hh" // auto - generated stuff
+//#include "cpu/minor/fetch2.hh"
+//#include "debug/Drain.hh" // auto - generated stuff
 #include "debug/MinorCPU.hh"
-#include "debug/MinorTrace.hh"
+//#include "debug/MinorTrace.hh"
 #include "debug/Quiesce.hh"
 
 namespace gem5
 {
 
-namespace minor
+namespace cclass
 {
 
-Pipeline::Pipeline(MinorCPU &cpu_, const BaseMinorCPUParams &params) :
+Pipeline::Pipeline(CClass &cpu_, const BaseMinorCPUParams &params) :
     Ticked(cpu_, &(cpu_.BaseCPU::baseStats.numCycles)),
     cpu(cpu_),
-    allow_idling(params.enableIdling),
-    f1ToF2(cpu.name() + ".f1ToF2", "lines",
+    //allow_idling(params.enableIdling),
+   /* f1ToF2(cpu.name() + ".f1ToF2", "lines",
         params.fetch1ToFetch2ForwardDelay),
     f2ToF1(cpu.name() + ".f2ToF1", "prediction",
         params.fetch1ToFetch2BackwardDelay, true),
@@ -38,16 +38,17 @@ Pipeline::Pipeline(MinorCPU &cpu_, const BaseMinorCPUParams &params) :
         f2ToD.output(), dToE.input(), execute.inputBuffer),
     fetch2(cpu.name() + ".fetch2", cpu, params,
         f1ToF2.output(), eToF1.output(), f2ToF1.input(), f2ToD.input(),
-        decode.inputBuffer),
+        decode.inputBuffer), */
     fetch1(cpu.name() + ".fetch1", cpu, params,
-        eToF1.output(), f1ToF2.input(), f2ToF1.output(), fetch2.inputBuffer),
-    activityRecorder(cpu.name() + ".activity", Num_StageId,
-        /* The max depth of inter-stage FIFOs */
-        std::max(params.fetch1ToFetch2ForwardDelay,
-        std::max(params.fetch2ToDecodeForwardDelay,
-        std::max(params.decodeToExecuteForwardDelay,
-        params.executeBranchDelay)))),
-    needToSignalDrained(false)
+        eToF1.output(), f1ToF2.input(), f2ToF1.output(), fetch2.inputBuffer)
+    /*activityRecorder(cpu.name() + ".activity", Num_StageId,
+      *   The max depth of inter-stage FIFOs 
+      *   std::max(params.fetch1ToFetch2ForwardDelay,
+      *  std::max(params.fetch2ToDecodeForwardDelay,
+      * std::max(params.decodeToExecuteForwardDelay,
+      * params.executeBranchDelay)))),
+      *  needToSignalDrained(false)
+      *  */
 {
     if (params.fetch1ToFetch2ForwardDelay < 1) {
         fatal("%s: fetch1ToFetch2ForwardDelay must be >= 1 (%d)\n",
@@ -69,7 +70,7 @@ Pipeline::Pipeline(MinorCPU &cpu_, const BaseMinorCPUParams &params) :
             cpu.name(), params.executeBranchDelay);
     }
 }
-
+/*
 void
 Pipeline::minorTrace() const
 {
@@ -84,7 +85,7 @@ Pipeline::minorTrace() const
     eToF1.minorTrace();
     activityRecorder.minorTrace();
 }
-
+*/
 void
 Pipeline::evaluate()
 {
@@ -94,36 +95,36 @@ Pipeline::evaluate()
     /* Note that it's important to evaluate the stages in order to allow
      *  'immediate', 0-time-offset TimeBuffer activity to be visible from
      *  later stages to earlier ones in the same cycle */
-    execute.evaluate();
-    decode.evaluate();
-    fetch2.evaluate();
+    //execute.evaluate();
+    //decode.evaluate();
+    //fetch2.evaluate();
     fetch1.evaluate();
 
-    if (debug::MinorTrace)
+    /*if (debug::MinorTrace)
         minorTrace();
 
-    /* Update the time buffers after the stages */
+    Update the time buffers after the stages 
     f1ToF2.evaluate();
     f2ToF1.evaluate();
     f2ToD.evaluate();
     dToE.evaluate();
     eToF1.evaluate();
 
-    /* The activity recorder must be be called after all the stages and
-     *  before the idler (which acts on the advice of the activity recorder */
+     The activity recorder must be be called after all the stages and
+     before the idler (which acts on the advice of the activity recorder 
     activityRecorder.evaluate();
-
+    
     if (allow_idling) {
-        /* Become idle if we can but are not draining */
+         Become idle if we can but are not draining 
         if (!activityRecorder.active() && !needToSignalDrained) {
             DPRINTF(Quiesce, "Suspending as the processor is idle\n");
             stop();
         }
-
-        /* Deactivate all stages.  Note that the stages *could*
-         *  activate and deactivate themselves but that's fraught
-         *  with additional difficulty.
-         *  As organised herre */
+        
+         Deactivate all stages.  Note that the stages *could*
+           activate and deactivate themselves but that's fraught
+           with additional difficulty.
+          As organised herre 
         activityRecorder.deactivateStage(Pipeline::CPUStageId);
         activityRecorder.deactivateStage(Pipeline::Fetch1StageId);
         activityRecorder.deactivateStage(Pipeline::Fetch2StageId);
@@ -131,7 +132,7 @@ Pipeline::evaluate()
         activityRecorder.deactivateStage(Pipeline::ExecuteStageId);
     }
 
-    if (needToSignalDrained) /* Must be draining */
+    if (needToSignalDrained)  Must be draining 
     {
         DPRINTF(Drain, "Still draining\n");
         if (isDrained()) {
@@ -140,7 +141,7 @@ Pipeline::evaluate()
             needToSignalDrained = false;
             stop();
         }
-    }
+    }*/
 }
 
 MinorCPU::MinorCPUPort &
@@ -148,7 +149,7 @@ Pipeline::getInstPort()
 {
     return fetch1.getIcachePort();
 }
-
+/*
 MinorCPU::MinorCPUPort &
 Pipeline::getDataPort()
 {
@@ -169,8 +170,8 @@ Pipeline::drain()
 
     execute.drain();
 
-    /* Make sure that needToSignalDrained isn't accidentally set if we
-     *  are 'pre-drained' */
+     Make sure that needToSignalDrained isn't accidentally set if we
+       are 'pre-drained' 
     bool drained = isDrained();
     needToSignalDrained = !drained;
 
@@ -220,6 +221,6 @@ Pipeline::isDrained()
 
     return ret;
 }
-
+*/
 } // namespace minor
 } // namespace gem5
