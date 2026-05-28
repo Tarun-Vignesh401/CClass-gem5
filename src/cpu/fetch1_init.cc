@@ -141,8 +141,6 @@ void evaluate(){
             nextstageReserve[0].reserve();
             processResponse(out_thread,fetchInfo[0]);
         }
-
-
     }
 
 
@@ -157,6 +155,6 @@ void processResponse(Fetch1ThreadInfo &out, Fetch1ThreadInfo &thread){
 
 
 
-    
+
   } // namespace cclass
 } //namespace gem5

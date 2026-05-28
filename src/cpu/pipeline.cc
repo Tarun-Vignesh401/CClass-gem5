@@ -22,9 +22,9 @@ Pipeline::Pipeline(CClass &cpu_, const BaseMinorCPUParams &params) :
     Ticked(cpu_, &(cpu_.BaseCPU::baseStats.numCycles)),
     cpu(cpu_),
     //allow_idling(params.enableIdling),
-   /* f1ToF2(cpu.name() + ".f1ToF2", "lines",
+    f1ToF2(cpu.name() + ".f1ToF2", "lines",
         params.fetch1ToFetch2ForwardDelay),
-    f2ToF1(cpu.name() + ".f2ToF1", "prediction",
+    /*f2ToF1(cpu.name() + ".f2ToF1", "prediction",
         params.fetch1ToFetch2BackwardDelay, true),
     f2ToD(cpu.name() + ".f2ToD", "insts",
         params.fetch2ToDecodeForwardDelay),
@@ -101,11 +101,11 @@ Pipeline::evaluate()
     fetch1.evaluate();
 
     /*if (debug::MinorTrace)
-        minorTrace();
+        minorTrace();*/
 
-    Update the time buffers after the stages 
+    //Update the time buffers after the stages 
     f1ToF2.evaluate();
-    f2ToF1.evaluate();
+/* f2ToF1.evaluate();
     f2ToD.evaluate();
     dToE.evaluate();
     eToF1.evaluate();
@@ -155,13 +155,13 @@ Pipeline::getDataPort()
 {
     return execute.getDcachePort();
 }
-
+*/
 void
 Pipeline::wakeupFetch(ThreadID tid)
 {
     fetch1.wakeupFetch(tid);
 }
-
+/*
 bool
 Pipeline::drain()
 {

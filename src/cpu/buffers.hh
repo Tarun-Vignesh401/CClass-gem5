@@ -5,8 +5,8 @@
  * Classes for buffer, queue and FIFO behaviour.
  */
 
-#ifndef __CPU_MINOR_BUFFERS_HH__
-#define __CPU_MINOR_BUFFERS_HH__
+#ifndef __CPU_CCLASS_BUFFERS_HH__
+#define __CPU_CCLASS_BUFFERS_HH__
 
 #include <iostream>
 #include <queue>
@@ -17,13 +17,13 @@
 #include "base/named.hh"
 #include "base/types.hh"
 #include "cpu/activity.hh"
-#include "cpu/minor/trace.hh"
+#include "cpu/cclass/trace.hh"
 #include "cpu/timebuf.hh"
 
 namespace gem5
 {
 
-namespace minor
+namespace cclass
 {
 
 /** Interface class for data with reporting/tracing facilities.  This
@@ -119,7 +119,7 @@ class BubbleTraitsPtrAdaptor
 template <typename ElemType,
     typename ReportTraits = ReportTraitsAdaptor<ElemType>,
     typename BubbleTraits = BubbleTraitsAdaptor<ElemType> >
-class MinorBuffer : public Named, public TimeBuffer<ElemType>
+class CClassBuffer : public Named, public TimeBuffer<ElemType>
 {
   protected:
     /** The range of elements that should appear in trace lines */
@@ -129,7 +129,7 @@ class MinorBuffer : public Named, public TimeBuffer<ElemType>
     std::string dataName;
 
   public:
-    MinorBuffer(const std::string &name,
+    CClassBuffer(const std::string &name,
         const std::string &data_name,
         int num_past, int num_future,
         int report_left = -1, int report_right = -1) :
@@ -157,6 +157,7 @@ class MinorBuffer : public Named, public TimeBuffer<ElemType>
       * will produce two slices with current (just assigned) and last (one
       * advance() old) slices with the current (0) one on the left.
       * Reverse the numbers to change the order of slices */
+     /*
     void
     minorTrace() const
     {
@@ -176,7 +177,7 @@ class MinorBuffer : public Named, public TimeBuffer<ElemType>
         }
 
         minor::minorTrace("%s=%s\n", dataName, data.str());
-    }
+    }*/
 };
 
 /** Wraps a MinorBuffer with Input/Output interfaces to ensure that units
@@ -185,7 +186,7 @@ template <typename Data>
 class Latch
 {
   public:
-    typedef MinorBuffer<Data> Buffer;
+    typedef CClassBuffer<Data> Buffer;
 
   protected:
     /** Delays, in cycles, writing data into the latch and seeing it on the
@@ -242,7 +243,7 @@ class Latch
     /** An interface to just the output of the buffer */
     Output output() { return Output(buffer.getWire(-delay)); }
 
-    void minorTrace() const { buffer.minorTrace(); }
+    //void minorTrace() const { buffer.minorTrace(); }
 
     void evaluate() { buffer.advance(); }
 };
@@ -254,7 +255,7 @@ class Latch
 template <typename ElemType,
     typename ReportTraits,
     typename BubbleTraits = BubbleTraitsAdaptor<ElemType> >
-class SelfStallingPipeline : public MinorBuffer<ElemType, ReportTraits>
+class SelfStallingPipeline : public CClassBuffer<ElemType, ReportTraits>
 {
   protected:
     /** Wire at the input end of the pipeline (for convenience) */
@@ -273,7 +274,7 @@ class SelfStallingPipeline : public MinorBuffer<ElemType, ReportTraits>
     SelfStallingPipeline(const std::string &name,
         const std::string &data_name,
         unsigned depth) :
-        MinorBuffer<ElemType, ReportTraits>
+        CClassBuffer<ElemType, ReportTraits>
             (name, data_name, depth, 0, -1, -depth),
         pushWire(this->getWire(0)),
         popWire(this->getWire(-depth)),
@@ -472,11 +473,11 @@ class Queue : public Named, public Reservable
     bool empty() const { return queue.empty(); }
 
     void
-    minorTrace() const
+    /*minorTrace() const
     {
         std::ostringstream data;
         /* If we become over-full, totalSpace() can actually be smaller than
-         * occupiedSpace().  Handle this */
+         * occupiedSpace().  Handle this 
         unsigned int num_total = (occupiedSpace() > totalSpace() ?
             occupiedSpace() : totalSpace());
 
@@ -484,7 +485,7 @@ class Queue : public Named, public Reservable
         unsigned int num_occupied = occupiedSpace();
 
         int num_printed = 1;
-        /* Bodge to rotate queue to report elements */
+        /* Bodge to rotate queue to report elements 
         while (num_printed <= num_occupied) {
             ReportTraits::reportData(data, queue[num_printed - 1]);
             num_printed++;
@@ -494,7 +495,7 @@ class Queue : public Named, public Reservable
         }
 
         int num_printed_reserved = 1;
-        /* Show reserved slots */
+        /* Show reserved slots 
         while (num_printed_reserved <= num_reserved &&
             num_printed <= num_total)
         {
@@ -506,7 +507,7 @@ class Queue : public Named, public Reservable
                 data << ',';
         }
 
-        /* And finally pad with empty slots (if there are any) */
+        /* And finally pad with empty slots (if there are any) 
         while (num_printed <= num_total) {
             num_printed++;
 
@@ -515,7 +516,7 @@ class Queue : public Named, public Reservable
         }
 
         minor::minorTrace("%s=%s\n", dataName, data.str());
-    }
+    }*/
 };
 
 /** Like a Queue but with a restricted interface and a setTail function
@@ -601,11 +602,11 @@ class InputBuffer : public Reservable
 
     /** Report elements */
     void
-    minorTrace() const
+    /*minorTrace() const
     {
         pushTail();
         queue.minorTrace();
-    }
+    }*/
 
     /** Reservable interface, passed on to queue */
     bool canReserve() const { return queue.canReserve(); }
@@ -621,7 +622,7 @@ class InputBuffer : public Reservable
     }
 };
 
-} // namespace minor
+} // namespace cclass
 } // namespace gem5
 
-#endif /* __CPU_MINOR_BUFFERS_HH__ */
+#endif /* __CPU_CCLASS_BUFFERS_HH__ */

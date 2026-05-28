@@ -225,7 +225,7 @@ CClassCPU::activateContext(ThreadID thread_id)
      *  wakeup call on the pipeline from adding the quiesce period
      *  to BaseCPU::numCycles */
     
-    stats.quiesceCycles += pipeline->cyclesSinceLastStopped();
+    //stats.quiesceCycles += pipeline->cyclesSinceLastStopped();
     pipeline->resetLastStopped();
 
     /* Wake up the thread, wakeup the pipeline tick */
