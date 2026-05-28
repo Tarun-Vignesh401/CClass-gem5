@@ -10,19 +10,19 @@ namespace gem5
 
 CClassCPU::CClassCPU(const BaseCClassCPUParams &params):
     BaseCPU(params),
-    threadPolicy(params.threadPolicy),
+    //threadPolicy(params.threadPolicy),
     //stats(this)
 {
     /* This is only written for one thread at the moment */
-    CC::CCThread *thread;
+    cclass::CClassThread *thread;
 
     for (ThreadID i = 0; i < numThreads; i++) {
         if (FullSystem) {
-            thread = new minor::MinorThread(this, i, params.system,
+            thread = new cclass::CClassThread(this, i, params.system,
                     params.mmu, params.isa[i], params.decoder[i]);
             thread->setStatus(ThreadContext::Halted);
         } else {
-            thread = new minor::MinorThread(this, i, params.system,
+            thread = new cclass::CClassThread(this, i, params.system,
                     params.workload[i], params.mmu,
                     params.isa[i], params.decoder[i]);
         }
@@ -34,7 +34,7 @@ CClassCPU::CClassCPU(const BaseCClassCPUParams &params):
 
 
     /*if (params.checker) {
-        fatal("The Minor model doesn't support checking (yet)\n");
+        fatal("The CClass model doesn't support checking (yet)\n");
     }*/
 
     pipeline = new cclass::Pipeline(*this, params);
@@ -55,12 +55,12 @@ CClassCPU::~CClassCPU()
 }
 
 void
-MinorCPU::init()
+CClassCPU::init()
 {
     BaseCPU::init();
 
     if (!params().switched_out && system->getMemoryMode() != enums::timing) {
-        fatal("The Minor CPU requires the memory system to be in "
+        fatal("The CClass CPU requires the memory system to be in "
             "'timing' mode.\n");
     }
 }
@@ -68,42 +68,42 @@ MinorCPU::init()
 /** Stats interface from SimObject (by way of BaseCPU) */
 /*
 void
-MinorCPU::regStats()
+CClassCPU::regStats()
 {
     BaseCPU::regStats();
     pipeline->regStats();
 }*/
 
 void
-MinorCPU::serializeThread(CheckpointOut &cp, ThreadID thread_id) const
+CClassCPU::serializeThread(CheckpointOut &cp, ThreadID thread_id) const
 {
     threads[thread_id]->serialize(cp);
 }
 
 void
-MinorCPU::unserializeThread(CheckpointIn &cp, ThreadID thread_id)
+CClassCPU::unserializeThread(CheckpointIn &cp, ThreadID thread_id)
 {
     threads[thread_id]->unserialize(cp);
 }
-/*
+
 void
-MinorCPU::serialize(CheckpointOut &cp) const
+CClassCPU::serialize(CheckpointOut &cp) const
 {
     pipeline->serialize(cp);
     BaseCPU::serialize(cp);
 }
 
 void
-MinorCPU::unserialize(CheckpointIn &cp)
+CClassCPU::unserialize(CheckpointIn &cp)
 {
     pipeline->unserialize(cp);
     BaseCPU::unserialize(cp);
 }
-*/
+
 void
-MinorCPU::wakeup(ThreadID tid)
+CClassCPU::wakeup(ThreadID tid)
 {
-    DPRINTF(Drain, "[tid:%d] MinorCPU wakeup\n", tid);
+    DPRINTF(Drain, "[tid:%d] CClassCPU wakeup\n", tid);
     assert(tid < numThreads);
 
     if (threads[tid]->status() == ThreadContext::Suspended) {
@@ -112,55 +112,55 @@ MinorCPU::wakeup(ThreadID tid)
 }
 
 void
-MinorCPU::startup()
+CClassCPU::startup()
 {
-    DPRINTF(MinorCPU, "MinorCPU startup\n");
+    DPRINTF(CClassCPU, "CClassCPU startup\n");
 
     BaseCPU::startup();
 
 
     schedule(fetchEvent, clockEdge(Cycles(0)));
-   /* for (ThreadID tid = 0; tid < numThreads; tid++)
+   or (ThreadID tid = 0; tid < numThreads; tid++)
         pipeline->wakeupFetch(tid);*/
 }
 
 /*
 DrainState
-MinorCPU::drain()
+CClassCPU::drain()
 {
     // Deschedule any power gating event (if any)
     deschedulePowerGatingEvent();
 
     if (switchedOut()) {
-        DPRINTF(Drain, "Minor CPU switched out, draining not needed.\n");
+        DPRINTF(Drain, "CClass CPU switched out, draining not needed.\n");
         return DrainState::Drained;
     }
 
-    DPRINTF(Drain, "MinorCPU drain\n"); */
+    DPRINTF(Drain, "CClassCPU drain\n"); */
 
     /* Need to suspend all threads and wait for Execute to idle.
      * Tell Fetch1 not to fetch */
     /*
     if (pipeline->drain()) {
-        DPRINTF(Drain, "MinorCPU drained\n");
+        DPRINTF(Drain, "CClassCPU drained\n");
         return DrainState::Drained;
     } else {
-        DPRINTF(Drain, "MinorCPU not finished draining\n");
+        DPRINTF(Drain, "CClassCPU not finished draining\n");
         return DrainState::Draining;
     }
 }*/
 
 /*
 void
-MinorCPU::signalDrainDone()
+CClassCPU::signalDrainDone()
 {
-    DPRINTF(Drain, "MinorCPU drain done\n");
+    DPRINTF(Drain, "CClassCPU drain done\n");
     Drainable::signalDrainDone();
 }
 */
 /*
 void
-MinorCPU::drainResume()
+CClassCPU::drainResume()
 {
     /* When taking over from another cpu make sure lastStopped
      * is reset since it might have not been defined previously
@@ -172,10 +172,10 @@ MinorCPU::drainResume()
         return;
     }
 
-    DPRINTF(Drain, "MinorCPU drainResume\n");
+    DPRINTF(Drain, "CClassCPU drainResume\n");
 
     if (!system->isTimingMode()) {
-        fatal("The Minor CPU requires the memory system to be in "
+        fatal("The CClass CPU requires the memory system to be in "
             "'timing' mode.\n");
     }
 
@@ -190,15 +190,15 @@ MinorCPU::drainResume()
 }
 
 void
-MinorCPU::memWriteback()
+CClassCPU::memWriteback()
 {
-    DPRINTF(Drain, "MinorCPU memWriteback\n");
+    DPRINTF(Drain, "CClassCPU memWriteback\n");
 }
 
 void
-MinorCPU::switchOut()
+CClassCPU::switchOut()
 {
-    DPRINTF(MinorCPU, "MinorCPU switchOut\n");
+    DPRINTF(CClassCPU, "CClassCPU switchOut\n");
 
     assert(!switchedOut());
     BaseCPU::switchOut();
@@ -209,29 +209,29 @@ MinorCPU::switchOut()
 }
 
 void
-MinorCPU::takeOverFrom(BaseCPU *old_cpu)
+CClassCPU::takeOverFrom(BaseCPU *old_cpu)
 {
-    DPRINTF(MinorCPU, "MinorCPU takeOverFrom\n");
+    DPRINTF(CClassCPU, "CClassCPU takeOverFrom\n");
 
     BaseCPU::takeOverFrom(old_cpu);
 }
-
+*/
 void
-MinorCPU::activateContext(ThreadID thread_id)
+CClassCPU::activateContext(ThreadID thread_id)
 {
-    DPRINTF(MinorCPU, "ActivateContext thread: %d\n", thread_id);
+    DPRINTF(CClassCPU, "ActivateContext thread: %d\n", thread_id);
 
     /* Do some cycle accounting.  lastStopped is reset to stop the
      *  wakeup call on the pipeline from adding the quiesce period
      *  to BaseCPU::numCycles */
-    /*
+    
     stats.quiesceCycles += pipeline->cyclesSinceLastStopped();
     pipeline->resetLastStopped();
 
     /* Wake up the thread, wakeup the pipeline tick */
-    /*
+    
     threads[thread_id]->activate();
-    wakeupOnEvent(minor::Pipeline::CPUStageId);
+    wakeupOnEvent(CClass::Pipeline::CPUStageId);
 
     if (!threads[thread_id]->getUseForClone())//the thread is not cloned
     {
@@ -248,9 +248,9 @@ MinorCPU::activateContext(ThreadID thread_id)
 }
 
 void
-MinorCPU::suspendContext(ThreadID thread_id)
+CClassCPU::suspendContext(ThreadID thread_id)
 {
-    DPRINTF(MinorCPU, "SuspendContext %d\n", thread_id);
+    DPRINTF(CClassCPU, "SuspendContext %d\n", thread_id);
 
     threads[thread_id]->suspend();
 
@@ -258,29 +258,29 @@ MinorCPU::suspendContext(ThreadID thread_id)
 }
 
 void
-MinorCPU::wakeupOnEvent(unsigned int stage_id)
+CClassCPU::wakeupOnEvent(unsigned int stage_id)
 {
     DPRINTF(Quiesce, "Event wakeup from stage %d\n", stage_id);
 
     /* Mark that some activity has taken place and start the pipeline */
-    /*activityRecorder->activateStage(stage_id);
+    activityRecorder->activateStage(stage_id);
     pipeline->start();
 }
-*/
+/*
 Port &
-MinorCPU::getInstPort()
+CClassCPU::getInstPort()
 {
     return pipeline->getInstPort();
 }
 
 Port &
-MinorCPU::getDataPort()
+CClassCPU::getDataPort()
 {
     return pipeline->getDataPort();
 }
 
 Counter
-MinorCPU::totalInsts() const
+CClassCPU::totalInsts() const
 {
     Counter ret = 0;
 
@@ -291,7 +291,7 @@ MinorCPU::totalInsts() const
 }
 
 Counter
-MinorCPU::totalOps() const
+CClassCPU::totalOps() const
 {
     Counter ret = 0;
 

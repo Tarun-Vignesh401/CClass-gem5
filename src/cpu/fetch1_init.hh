@@ -28,11 +28,10 @@ namespace gem5
             CClassCPU &cpu;
             // have to make the class template for this
             std::vector<InputBuffer<Fetch1ThreadInfo>> &nextStageReserve;
-            Latch<Fetch1ThreadInfo>::Input inp;
+            Latch<Fetch1ThreadInfo>::Input out;
             //idk maybe this should come in fetch2?
            // Addr lineSnap;
-           // Addr maxLineWidth;
-            
+           // Addr maxLineWidth;            
             unsigned int fetchLimit;
            
             public:
@@ -48,7 +47,7 @@ namespace gem5
             //this enum is primarily for multithreading support.
             enum Fetch1State {
                 PCGenHalted,
-                PCGenerated,
+                PCGenRunning,
                 PCWaitingForChange,    
             };
             struct Fetch1ThreadInfo
