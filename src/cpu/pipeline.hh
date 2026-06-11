@@ -5,16 +5,16 @@
  *  between the CPU and its grubby implementation details clean.
  */
 
-#ifndef __CPU_MINOR_PIPELINE_HH__
-#define __CPU_MINOR_PIPELINE_HH__
+#ifndef __CPU_CCLASS_PIPELINE_HH__
+#define __CPU_CCLASS_PIPELINE_HH__
 
-#include "cpu/minor/activity.hh"
-#include "cpu/minor/cpu.hh"
-#include "cpu/minor/decode.hh"
-#include "cpu/minor/execute.hh"
-#include "cpu/minor/fetch1.hh"
-#include "cpu/minor/fetch2.hh"
-#include "params/BaseMinorCPU.hh"
+//#include "cpu/cclass/activity.hh"
+#include "cpu/cclass/cpu.hh"
+//#include "cpu/cclass/decode.hh"
+//#include "cpu/cclass/execute.hh"
+#include "cpu/cclass/fetch1.hh"
+#include "cpu/cclass/fetch2.hh"
+#include "params/BaseCClassCPU.hh"
 #include "sim/ticked_object.hh"
 
 namespace gem5
@@ -48,13 +48,56 @@ class Pipeline : public Ticked
 
     //Execute execute;
     //Decode decode;
-    //Fetch2 fetch2;
+    Fetch2 fetch2;
     Fetch1 fetch1;
 
     /** Activity recording for the pipeline.  This is access through the CPU
      *  by the pipeline stages but belongs to the Pipeline as it is the
      *  cleanest place to initialise it */
     //MinorActivityRecorder activityRecorder;
+
+    class IcachePort : public CClassCPU::CClassCPUPort
+    {
+      protected:
+        /** My owner */
+      Pipeline &pipeline;
+
+      public:
+        IcachePort(std::string name, Pipeline &pipeline, CClassCPU &cpu) :
+            CClassCPU::CClassCPUPort(name, cpu), pipeline(pipeline)
+        { }
+
+      protected:
+        bool recvTimingResp(PacketPtr pkt);
+
+        void recvReqRetry() override;
+    };
+
+    class DcachePort : public CClassCPU::CClassCPUPort
+    {
+      protected:
+        /** My owner */
+      Pipeline &pipeline;
+
+      public:
+        DcachePort(std::string name, Pipeline &pipeline, CClassCPU &cpu) :
+            CClassCPU::CClassCPUPort(name, cpu), pipeline(pipeline)
+        { }
+
+      protected:
+        bool recvTimingResp(PacketPtr pkt) override;
+
+        void recvReqRetry() override;
+
+        bool isSnooping() const override;
+
+        void recvTimingSnoopReq(PacketPtr pkt) override;
+
+        void recvFunctionalSnoop(PacketPtr pkt) override;
+    };
+
+    DcachePort dcachePort;
+    IcachePort icachePort;
 
   public:
     /** Enumerated ids of the 'stages' for the activity recorder */
@@ -71,7 +114,7 @@ class Pipeline : public Ticked
     //bool needToSignalDrained;
 
   public:
-    Pipeline(CClassCPU &cpu_, const BaseMinorCPUParams &params);
+    Pipeline(CClassCPU &cpu_, const BaseCClassCPUParams &params);
 
   public:
     /** Wake up the Fetch unit.  This is needed on thread activation esp.
@@ -98,7 +141,7 @@ class Pipeline : public Ticked
     /** Return the IcachePort belonging to Fetch1 for the CPU */
     CClassCPU::CClassCPUPort &getInstPort();
     /** Return the DcachePort belonging to Execute for the CPU */
-    //MinorCPU::MinorCPUPort &getDataPort();
+    CClassCPU::CClassCPUPort &getDataPort();
 
     /** To give the activity recorder to the CPU */
     //MinorActivityRecorder *getActivityRecorder() { return &activityRecorder; }
@@ -107,4 +150,4 @@ class Pipeline : public Ticked
 } // namespace cclass
 } // namespace gem5
 
-#endif /* __CPU_MINOR_PIPELINE_HH__ */
+#endif /* __CPU_CCLASS_PIPELINE_HH__ */

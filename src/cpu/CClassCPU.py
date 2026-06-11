@@ -14,4 +14,7 @@ if len(enabled) == 1:
     if arch == "USE_ARM_ISA":
         from m5.objects.ArmCPU import ArmCClassCPU as CClassCPU
     if arch == "USE_RISCV_ISA":
-        from m5.objects.RiscvCPU import RiscvCClassCPU as CClassCPU
+        try:
+            from m5.objects.RiscvCPU import RiscvCClassCPU as CClassCPU
+        except ImportError:
+            from m5.objects import BaseCClassCPU as CClassCPU

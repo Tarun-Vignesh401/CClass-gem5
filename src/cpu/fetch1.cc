@@ -1,3 +1,25 @@
+#include "cpu/cclass/fetch1.hh"
+
+#include <cstring>
+#include <iomanip>
+#include <sstream>
+
+#include "arch/generic/decoder.hh"
+#include "base/cast.hh"
+#include "base/compiler.hh"
+#include "base/logging.hh"
+#include "base/trace.hh"
+#include "cpu/cclass/pipeline.hh"
+#include "cpu/cclass/pipe_data.hh"
+//#include "debug/Drain.hh"
+#include "arch/riscv/pcstate.hh"
+#include "debug/CClassFetch.hh"
+#include "debug/CClassCPU.hh"
+
+
+#include "cpu/cclass/buffers.hh"
+//#include "debug/MinorTrace.hh"
+
 namespace gem5
 {
     namespace cclass
@@ -12,6 +34,8 @@ namespace gem5
             cpu(cpu_),
             nextStageReserve(next_stage_input_buffer),
             out(out_),
+            fetchInfo(params.numThreads),
+            threadPriority(0),
             fetchLimit(params.fetch1FetchLimit)
         {
         for (auto &info: fetchInfo)
@@ -30,6 +54,43 @@ namespace gem5
         return 0;
     }
 
+    void
+    Fetch1::wakeupFetch(ThreadID tid)
+    {
+    ThreadContext *thread_ctx = cpu.getContext(tid);
+    Fetch1ThreadInfo &thread = fetchInfo[tid];
+    set(thread.pc, thread_ctx->pcState());
+    thread.FetchAddr = thread.pc->instAddr();
+    thread.state = PCGenRunning;
+    thread.wakeupGuard = true;
+    DPRINTF(CClassFetch, "[tid:%d]: Changing stream wakeup %s\n", tid, *thread.pc);
+
+    cpu.wakeupOnEvent(Pipeline::Fetch1StageId);
+    }
+    void 
+    Fetch1::advancepc(ThreadID tid){
+
+        //advance the pc in thread context and copy it into fetchInfo for advancement into fetch2
+        ThreadContext *thread_ctx = cpu.getContext(tid);
+        Fetch1ThreadInfo &thread = fetchInfo[tid];
+        RiscvISA::PCState pc = thread_ctx->pcState().as<RiscvISA::PCState>();
+        pc.advance();
+        thread_ctx->pcState(pc);
+        set(thread.pc, thread_ctx->pcState());
+        thread.FetchAddr = thread.pc->instAddr();
+        thread.state = PCGenRunning;
+        thread.wakeupGuard = true;
+    }
+
+
+/*
+void updateExpectedSeqNums(const BranchData &branch)
+{
+    // sequence number change only when branch occurs pending implementation until branch predictor
+}
+
+*/
+/*
 void
 Fetch1::changeStream(const BranchData &branch)
 {
@@ -37,7 +98,7 @@ Fetch1::changeStream(const BranchData &branch)
 
     updateExpectedSeqNums(branch);
 
-    /* Start fetching again if we were stopped */
+     Start fetching again if we were stopped 
     switch (branch.reason) {
       case BranchData::SuspendThread:
         {
@@ -62,8 +123,8 @@ Fetch1::changeStream(const BranchData &branch)
     set(thread.pc, branch.target);
     thread.fetchAddr = thread.pc->instAddr();
 }
-
-void evaluate(){
+*/
+void Fetch1::evaluate(){
         //once execute implemented(it is a latch timing involved)
         //const BranchData &execute_branch = *inp.outputWire;
 
@@ -71,19 +132,34 @@ void evaluate(){
         //const BranchData &branchPred = ;
 
         Fetch1ThreadInfo &out_thread = *out.inputWire;
-
-    for (ThreadID tid = 0; tid < cpu.numThreads; tid++)
+      //for (ThreadID tid = 0; tid < cpu.numThreads; tid++)
+      //for now single threaded support
+    //advance architectural PC here 
+    //std::cout<< "size of fetchInfo"<< fetchInfo.size() <<"\n";
+    for (ThreadID tid = 0; tid < cpu.numThreads; tid++){
         fetchInfo[tid].blocked = !nextStageReserve[tid].canReserve();
+        if(nextStageReserve[tid].canReserve()){
+            nextStageReserve[tid].reserve();
+            Fetch1::advancepc(tid);
+            processResponse(out_thread,fetchInfo[tid]);
+        }
+        else{
+            DPRINTF(CClassCPU,"PC generation halted");
+            fetchInfo[tid].state = PCGenHalted;
+        }
+
+    }
 
     //multi threading infrastructure
     /** Are both branches from later stages valid and for the same thread? */
+    /*
     if (execute_branch.threadId != InvalidThreadID &&
         execute_branch.threadId == branchPred.threadId) {
 
         Fetch1ThreadInfo &thread = fetchInfo[execute_branch.threadId];
 
         /* Are we changing stream?  Look to the Execute branches first, then
-         * to predicted changes of stream from Fetch2 */
+         * to predicted changes of stream from Fetch2 
         if (execute_branch.isStreamChange()) {
             if (thread.state == PCGenHalted) {
                 DPRINTF(Fetch1, "Halted, ignoring branch: %s\n", execute_branch);
@@ -97,12 +173,12 @@ void evaluate(){
             }
 
             /* The streamSeqNum tagging in request/response ->req should handle
-             *  discarding those requests when we get to them. */
+             *  discarding those requests when we get to them. 
         } else if (thread.state != PCGenHalted && branchPred.isStreamChange()) {
             /* Handle branch predictions by changing the instruction source
              * if we're still processing the same stream (as set by streamSeqNum)
              * as the one of the prediction.
-             */
+             
             if (branchPred.newStreamSeqNum != thread.streamSeqNum) {
                 DPRINTF(Fetch1, "Not changing stream on prediction: %s,"
                     " streamSeqNum mismatch\n",
@@ -112,7 +188,7 @@ void evaluate(){
             }
         }
     } else {
-        /* Fetch2 and Execute branches are for different threads */
+        /* Fetch2 and Execute branches are for different threads 
         if (execute_branch.threadId != InvalidThreadID &&
             execute_branch.isStreamChange()) {
 
@@ -136,21 +212,30 @@ void evaluate(){
             }
         }
     }
+    */
     // have to make sure to that there aren't too many fetches going on.
-        if(nextstageReserve[0].canReserve() < fetchLimit){
-            nextstageReserve[0].reserve();
-            processResponse(out_thread,fetchInfo[0]);
-        }
+    //std::cout<<"dummy\n";
+     
     }
 
 
-void processResponse(Fetch1ThreadInfo &out, Fetch1ThreadInfo &thread){
+void Fetch1::processResponse(Fetch1ThreadInfo &out, Fetch1ThreadInfo &thread){
     out.state = thread.state;
-    out.pc = thread.pc->clone();
+    out.pc.reset(thread.pc->clone());
     out.streamSeqNum = thread.streamSeqNum;
     out.predictionSeqNum = thread.predictionSeqNum;
     out.blocked = thread.blocked;
-    out.fetchAddr = thread.fetchAddr;        
+    out.FetchAddr = thread.FetchAddr;   
+    //std::cout << "Fetch1 processResponse called \n";
+    DPRINTF(CClassCPU,
+    " Fetch 1 stage: processResponse: state=%d streamSeq=%llu predSeq=%llu "
+    "blocked=%d fetchAddr=%#lx\n",
+    out.state,
+    out.streamSeqNum,
+    out.predictionSeqNum,
+    out.blocked,
+    out.pc->instAddr());
+    
     }
 
 

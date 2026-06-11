@@ -1,14 +1,14 @@
 
-#include "cpu/minor/pipeline.hh"
+#include "cpu/cclass/pipeline.hh"
 
 #include <algorithm>
 
 //#include "cpu/minor/decode.hh"
 //#include "cpu/minor/execute.hh"
-#include "cpu/minor/fetch1.hh"
-//#include "cpu/minor/fetch2.hh"
+#include "cpu/cclass/fetch1.hh"
+#include "cpu/cclass/fetch2.hh"
 //#include "debug/Drain.hh" // auto - generated stuff
-#include "debug/MinorCPU.hh"
+#include "debug/CClassCPU.hh"
 //#include "debug/MinorTrace.hh"
 #include "debug/Quiesce.hh"
 
@@ -18,12 +18,11 @@ namespace gem5
 namespace cclass
 {
 
-Pipeline::Pipeline(CClass &cpu_, const BaseMinorCPUParams &params) :
-    Ticked(cpu_, &(cpu_.BaseCPU::baseStats.numCycles)),
+Pipeline::Pipeline(CClassCPU &cpu_, const BaseCClassCPUParams &params) :
+    Ticked(cpu_,&(cpu_.BaseCPU::baseStats.numCycles)),
     cpu(cpu_),
     //allow_idling(params.enableIdling),
-    f1ToF2(cpu.name() + ".f1ToF2", "lines",
-        params.fetch1ToFetch2ForwardDelay),
+    f1ToF2(cpu.name() + ".f1ToF2", "lines",params.fetch1ToFetch2ForwardDelay),
     /*f2ToF1(cpu.name() + ".f2ToF1", "prediction",
         params.fetch1ToFetch2BackwardDelay, true),
     f2ToD(cpu.name() + ".f2ToD", "insts",
@@ -35,12 +34,11 @@ Pipeline::Pipeline(CClass &cpu_, const BaseMinorCPUParams &params) :
     execute(cpu.name() + ".execute", cpu, params,
         dToE.output(), eToF1.input()),
     decode(cpu.name() + ".decode", cpu, params,
-        f2ToD.output(), dToE.input(), execute.inputBuffer),
-    fetch2(cpu.name() + ".fetch2", cpu, params,
-        f1ToF2.output(), eToF1.output(), f2ToF1.input(), f2ToD.input(),
-        decode.inputBuffer), */
-    fetch1(cpu.name() + ".fetch1", cpu, params,
-        eToF1.output(), f1ToF2.input(), f2ToF1.output(), fetch2.inputBuffer)
+        f2ToD.output(), dToE.input(), execute.inputBuffer),*/
+    fetch2(cpu.name() + ".fetch2", cpu, params, f1ToF2.output()), 
+    fetch1(cpu.name() + ".fetch1", cpu, params, f1ToF2.input(), fetch2.inputBuffer),
+    dcachePort(cpu.name() + ".dcache_port", *this, cpu),
+    icachePort(cpu.name() + ".icache_port", *this, cpu)
     /*activityRecorder(cpu.name() + ".activity", Num_StageId,
       *   The max depth of inter-stage FIFOs 
       *   std::max(params.fetch1ToFetch2ForwardDelay,
@@ -88,7 +86,7 @@ Pipeline::minorTrace() const
 */
 void
 Pipeline::evaluate()
-{
+{   
     /** We tick the CPU to update the BaseCPU cycle counters */
     cpu.tick();
 
@@ -99,12 +97,14 @@ Pipeline::evaluate()
     //decode.evaluate();
     //fetch2.evaluate();
     fetch1.evaluate();
-
+    //std::cout << "current cycle : " << cpu.curCycle() << "\n";
     /*if (debug::MinorTrace)
         minorTrace();*/
 
     //Update the time buffers after the stages 
     f1ToF2.evaluate();
+
+    fetch2.finaldebugprint();
 /* f2ToF1.evaluate();
     f2ToD.evaluate();
     dToE.evaluate();
@@ -144,18 +144,18 @@ Pipeline::evaluate()
     }*/
 }
 
-MinorCPU::MinorCPUPort &
+CClassCPU::CClassCPUPort &
 Pipeline::getInstPort()
 {
-    return fetch1.getIcachePort();
+    return icachePort;
 }
-/*
-MinorCPU::MinorCPUPort &
+
+CClassCPU::CClassCPUPort &
 Pipeline::getDataPort()
 {
-    return execute.getDcachePort();
+    return dcachePort;
 }
-*/
+
 void
 Pipeline::wakeupFetch(ThreadID tid)
 {
@@ -220,7 +220,44 @@ Pipeline::isDrained()
         );
 
     return ret;
+}*/
+
+// Icache and Dcache port methods right here
+
+
+bool
+Pipeline::IcachePort::recvTimingResp(PacketPtr response)
+{
+  return 1;
 }
-*/
+
+void
+Pipeline::IcachePort::recvReqRetry()
+{
+   std::cout << "recvReqRetry called" << std::endl;
+}
+
+bool
+Pipeline::DcachePort::recvTimingResp(PacketPtr pkt) {
+    return 1;
+}
+void
+Pipeline::DcachePort::recvReqRetry() 
+{
+   std::cout << "recvReqRetry called" << std::endl;
+}
+bool
+Pipeline::DcachePort::isSnooping() const {
+    return 0;
+}
+
+void Pipeline::DcachePort::recvTimingSnoopReq(PacketPtr pkt){
+    std::cout << "recvTimingSnoopReq called" << std::endl;
+}
+ void Pipeline::DcachePort::recvFunctionalSnoop(PacketPtr pkt) {
+
+        std::cout << "recvFunctionalSnoop called" << std::endl;    
+ };
+
 } // namespace minor
 } // namespace gem5

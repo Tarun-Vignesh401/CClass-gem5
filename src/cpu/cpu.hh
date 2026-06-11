@@ -6,32 +6,31 @@
  *  
  */
 
-#ifndef __CPU_MINOR_CPU_HH__
-#define __CPU_MINOR_CPU_HH__
+#ifndef __CPU_CCLASS_CPU_HH__
+#define __CPU_CCLASS_CPU_HH__
 
 #include "base/compiler.hh"
 #include "base/random.hh"
 #include "cpu/base.hh"
-#include "cpu/minor/activity.hh"
-#include "cpu/minor/stats.hh"
+//#include "cpu/minor/activity.hh"
+//#include "cpu/minor/stats.hh"
 #include "cpu/simple_thread.hh"
-#include "enums/ThreadPolicy.hh"
-#include "params/BaseMinorCPU.hh"
+#include "enums/CClassThreadPolicy.hh"
+#include "params/BaseCClassCPU.hh"
 
 namespace gem5
 {
 
 namespace cclass
 {
-
 /** Forward declared to break the cyclic inclusion dependencies between
  *  pipeline and cpu */
-//class Pipeline;
+class Pipeline;
 
 /** Minor will use the SimpleThread state for now */
 typedef SimpleThread CClassThread;
+}
 
-} // namespace cclass
 
 class CClassCPU : public BaseCPU
 {
@@ -71,7 +70,7 @@ class CClassCPU : public BaseCPU
     };
 
     /** Thread Scheduling Policy (RoundRobin, Random, etc) */
-   // enums::ThreadPolicy threadPolicy;
+   enums::CClassThreadPolicy threadPolicy;
   protected:
      /** Return a reference to the data port. */
     Port &getDataPort() override;
@@ -94,7 +93,7 @@ class CClassCPU : public BaseCPU
     //cclass::CClassStats stats;
 
     /** Stats interface from SimObject (by way of BaseCPU) */
-    //void regStats() override;
+    void regStats() override;
 
     /** Simple inst count interface from BaseCPU */
     Counter totalInsts() const override;
@@ -156,10 +155,9 @@ class CClassCPU : public BaseCPU
      *  a callback or eventq event where the pipeline itself may have
      *  already been idled.  The stage argument should be from the
      *  enumeration Pipeline::StageId */
-    //void wakeupOnEvent(unsigned int stage_id);
+    void wakeupOnEvent(unsigned int stage_id);
     EventFunctionWrapper *fetchEventWrapper;
 };
-
 } // namespace gem5
 
-#endif /* __CPU_MINOR_CPU_HH__ */
+#endif /* __CPU_CCLASS_CPU_HH__ */

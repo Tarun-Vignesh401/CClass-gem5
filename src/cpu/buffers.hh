@@ -17,7 +17,6 @@
 #include "base/named.hh"
 #include "base/types.hh"
 #include "cpu/activity.hh"
-#include "cpu/cclass/trace.hh"
 #include "cpu/timebuf.hh"
 
 namespace gem5
@@ -472,8 +471,8 @@ class Queue : public Named, public Reservable
     /** Is the queue empty? */
     bool empty() const { return queue.empty(); }
 
-    void
-    /*minorTrace() const
+    /*void
+    minorTrace() const
     {
         std::ostringstream data;
         /* If we become over-full, totalSpace() can actually be smaller than
@@ -601,8 +600,8 @@ class InputBuffer : public Reservable
     }
 
     /** Report elements */
-    void
-    /*minorTrace() const
+    /*void
+    minorTrace() const
     {
         pushTail();
         queue.minorTrace();

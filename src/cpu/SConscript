@@ -4,10 +4,8 @@
 Import('*')
 
 if env['CONF']['BUILD_ISA']:
-    SimObject('BaseMinorCPU.py', sim_objects=[
-        'MinorOpClass', 'MinorOpClassSet', 'MinorFUTiming', 'MinorFU',
-        'MinorFUPool', 'BaseMinorCPU'],
-        enums=['ThreadPolicy'])
+    SimObject('BaseCClassCPU.py', sim_objects=['BaseCClassCPU'],
+        enums=['CClassThreadPolicy'])
 
 #    Source('activity.cc')
     Source('cpu.cc')
@@ -15,7 +13,7 @@ if env['CONF']['BUILD_ISA']:
 #    Source('dyn_inst.cc')
 #    Source('execute.cc')
     Source('fetch1.cc')
-#    Source('fetch2.cc')
+    Source('fetch2.cc')
 #    Source('func_unit.cc')
 #    Source('lsq.cc')
 #    Source('pipe_data.cc')
@@ -23,17 +21,18 @@ if env['CONF']['BUILD_ISA']:
 #   Source('scoreboard.cc')
 #    Source('stats.cc')
 
-    DebugFlag('MinorCPU', 'Minor CPU-level events')
+    DebugFlag('CClassCPU', 'CClass CPU-level events')
+    DebugFlag('CClassFetch', 'CClass fetch stage')
 #    DebugFlag('MinorExecute', 'Minor Execute stage')
 #    DebugFlag('MinorInterrupt', 'Minor interrupt handling')
-    DebugFlag('MinorMem', 'Minor memory accesses')
+    DebugFlag('CClassMem', 'CClass memory accesses')
 #    DebugFlag('MinorScoreboard', 'Minor Execute register scoreboard')
 #    DebugFlag('MinorTrace', 'MinorTrace cycle-by-cycle state trace')
-    DebugFlag('MinorTiming', 'Extra timing for instructions')
+    DebugFlag('CClassTiming', 'Extra timing for instructions')
 
 #    CompoundFlag('Minor', [
 #        'MinorCPU', 'MinorExecute', 'MinorInterrupt', 'MinorMem',
 #        'MinorScoreboard'])
 
     # For backwards compatibility
-    SimObject('MinorCPU.py', sim_objects=[], tags=['isa'])
+    SimObject('CClassCPU.py', sim_objects=[], tags=['isa'])
