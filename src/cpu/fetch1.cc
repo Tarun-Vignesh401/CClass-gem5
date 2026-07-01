@@ -40,7 +40,9 @@ namespace gem5
         {
         for (auto &info: fetchInfo)
             info.pc.reset(params.isa[0]->newPCState());
-            
+
+        for (ThreadID i=0;i<params.numThreads;i++)
+            fetchInfo[i].tid = i;            
             
         if (fetchLimit < 1) {
         fatal("%s: fetch1FetchLimit must be >= 1 (%d)\n", name_,
@@ -63,6 +65,7 @@ namespace gem5
     thread.FetchAddr = thread.pc->instAddr();
     thread.state = PCGenRunning;
     thread.wakeupGuard = true;
+    thread.makeValid();
     DPRINTF(CClassFetch, "[tid:%d]: Changing stream wakeup %s\n", tid, *thread.pc);
 
     cpu.wakeupOnEvent(Pipeline::Fetch1StageId);
@@ -80,6 +83,8 @@ namespace gem5
         thread.FetchAddr = thread.pc->instAddr();
         thread.state = PCGenRunning;
         thread.wakeupGuard = true;
+        thread.makeValid();
+
     }
 
 
@@ -144,11 +149,13 @@ void Fetch1::evaluate(){
             processResponse(out_thread,fetchInfo[tid]);
         }
         else{
-            DPRINTF(CClassCPU,"PC generation halted");
+            //DPRINTF(CClassCPU,"PC generation halted\n");
             fetchInfo[tid].state = PCGenHalted;
         }
 
     }
+
+
 
     //multi threading infrastructure
     /** Are both branches from later stages valid and for the same thread? */
@@ -220,26 +227,28 @@ void Fetch1::evaluate(){
 
 
 void Fetch1::processResponse(Fetch1ThreadInfo &out, Fetch1ThreadInfo &thread){
+   
     out.state = thread.state;
     out.pc.reset(thread.pc->clone());
     out.streamSeqNum = thread.streamSeqNum;
     out.predictionSeqNum = thread.predictionSeqNum;
     out.blocked = thread.blocked;
-    out.FetchAddr = thread.FetchAddr;   
+    out.FetchAddr = thread.FetchAddr;
+    out.tid = thread.tid; 
+    if(thread.pc){
+    out.makeValid();
+    }    
     //std::cout << "Fetch1 processResponse called \n";
     DPRINTF(CClassCPU,
     " Fetch 1 stage: processResponse: state=%d streamSeq=%llu predSeq=%llu "
-    "blocked=%d fetchAddr=%#lx\n",
+    "blocked=%d fetchAddr=%#lx Bubble : %d\n",
     out.state,
     out.streamSeqNum,
     out.predictionSeqNum,
     out.blocked,
-    out.pc->instAddr());
+    out.pc->instAddr(),
+    out.bubbleFlag);
     
-    }
-
-
-
-
+}
   } // namespace cclass
 } //namespace gem5

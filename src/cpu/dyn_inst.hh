@@ -89,7 +89,25 @@ namespace gem5
 
         return ret;
     }
+
+
 };
+
+inline std::ostream &
+operator <<(std::ostream &os, const InstId &id)
+{
+    os << id.threadId << '/' << id.streamSeqNum << '.'
+        << id.predictionSeqNum << '/' << id.lineSeqNum;
+
+    /* Not all structures have fetch and exec sequence numbers */
+    if (id.fetchSeqNum != 0) {
+        os << '/' << id.fetchSeqNum;
+        if (id.execSeqNum != 0)
+            os << '.' << id.execSeqNum;
+    }
+
+    return os;
+}
 
 } //namespace cclass
 } //namespace gem5 

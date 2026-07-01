@@ -7,8 +7,6 @@ namespace gem5
 
 namespace cclass
 {
-
-
 void
 ForwardLineData::setFault(Fault fault_)
 {
@@ -60,7 +58,7 @@ ForwardLineData::freeLine()
     }
 }
 
-void
+/*void
 ForwardLineData::reportData(std::ostream &os) const
 {
     if (isBubble())
@@ -69,7 +67,7 @@ ForwardLineData::reportData(std::ostream &os) const
         os << "F;" << id;
     else
         os << id;
-}
+}*/
 
 
 

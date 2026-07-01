@@ -23,11 +23,10 @@ Pipeline::Pipeline(CClassCPU &cpu_, const BaseCClassCPUParams &params) :
     cpu(cpu_),
     //allow_idling(params.enableIdling),
     f1ToF2(cpu.name() + ".f1ToF2", "lines",params.fetch1ToFetch2ForwardDelay),
-    /*f2ToF1(cpu.name() + ".f2ToF1", "prediction",
-        params.fetch1ToFetch2BackwardDelay, true),
+    
     f2ToD(cpu.name() + ".f2ToD", "insts",
         params.fetch2ToDecodeForwardDelay),
-    dToE(cpu.name() + ".dToE", "insts",
+    /*dToE(cpu.name() + ".dToE", "insts",
         params.decodeToExecuteForwardDelay),
     eToF1(cpu.name() + ".eToF1", "branch",
         params.executeBranchDelay),
@@ -35,10 +34,12 @@ Pipeline::Pipeline(CClassCPU &cpu_, const BaseCClassCPUParams &params) :
         dToE.output(), eToF1.input()),
     decode(cpu.name() + ".decode", cpu, params,
         f2ToD.output(), dToE.input(), execute.inputBuffer),*/
-    fetch2(cpu.name() + ".fetch2", cpu, params, f1ToF2.output()), 
+    decode(cpu.name() + ".decode", cpu, params,f2ToD.output()),
+    fetch2(cpu.name() + ".fetch2", cpu, params, f1ToF2.output(),
+        f2ToD.input(),decode.inputBuffer),
     fetch1(cpu.name() + ".fetch1", cpu, params, f1ToF2.input(), fetch2.inputBuffer),
-    dcachePort(cpu.name() + ".dcache_port", *this, cpu),
-    icachePort(cpu.name() + ".icache_port", *this, cpu)
+    dcachePort(cpu.name() + ".dcache_port", *this, cpu)
+    //icachePort(cpu.name() + ".icache_port", *this, cpu)
     /*activityRecorder(cpu.name() + ".activity", Num_StageId,
       *   The max depth of inter-stage FIFOs 
       *   std::max(params.fetch1ToFetch2ForwardDelay,
@@ -95,16 +96,20 @@ Pipeline::evaluate()
      *  later stages to earlier ones in the same cycle */
     //execute.evaluate();
     //decode.evaluate();
-    //fetch2.evaluate();
     fetch1.evaluate();
+    fetch2.evaluate();
     //std::cout << "current cycle : " << cpu.curCycle() << "\n";
     /*if (debug::MinorTrace)
         minorTrace();*/
-
     //Update the time buffers after the stages 
     f1ToF2.evaluate();
+    f2ToD.evaluate();
 
-    fetch2.finaldebugprint();
+    //fetch2.finaldebugprint();
+
+    //std::cout << "you've entered evaluate of fetch2!"<<std::endl;
+
+
 /* f2ToF1.evaluate();
     f2ToD.evaluate();
     dToE.evaluate();
@@ -147,7 +152,7 @@ Pipeline::evaluate()
 CClassCPU::CClassCPUPort &
 Pipeline::getInstPort()
 {
-    return icachePort;
+    return fetch2.icachePort;
 }
 
 CClassCPU::CClassCPUPort &
@@ -223,19 +228,6 @@ Pipeline::isDrained()
 }*/
 
 // Icache and Dcache port methods right here
-
-
-bool
-Pipeline::IcachePort::recvTimingResp(PacketPtr response)
-{
-  return 1;
-}
-
-void
-Pipeline::IcachePort::recvReqRetry()
-{
-   std::cout << "recvReqRetry called" << std::endl;
-}
 
 bool
 Pipeline::DcachePort::recvTimingResp(PacketPtr pkt) {

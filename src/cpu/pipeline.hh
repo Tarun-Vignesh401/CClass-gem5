@@ -10,7 +10,7 @@
 
 //#include "cpu/cclass/activity.hh"
 #include "cpu/cclass/cpu.hh"
-//#include "cpu/cclass/decode.hh"
+#include "cpu/cclass/decode.hh"
 //#include "cpu/cclass/execute.hh"
 #include "cpu/cclass/fetch1.hh"
 #include "cpu/cclass/fetch2.hh"
@@ -42,12 +42,12 @@ class Pipeline : public Ticked
 
     Latch<Fetch1ThreadInfo> f1ToF2;
     //Latch<BranchData> f2ToF1;
-   // Latch<ForwardInstData> f2ToD;
+    Latch<ForwardLineData> f2ToD;
     //Latch<ForwardInstData> dToE;
     //Latch<BranchData> eToF1;
 
     //Execute execute;
-    //Decode decode;
+    Decode decode;
     Fetch2 fetch2;
     Fetch1 fetch1;
 
@@ -55,23 +55,6 @@ class Pipeline : public Ticked
      *  by the pipeline stages but belongs to the Pipeline as it is the
      *  cleanest place to initialise it */
     //MinorActivityRecorder activityRecorder;
-
-    class IcachePort : public CClassCPU::CClassCPUPort
-    {
-      protected:
-        /** My owner */
-      Pipeline &pipeline;
-
-      public:
-        IcachePort(std::string name, Pipeline &pipeline, CClassCPU &cpu) :
-            CClassCPU::CClassCPUPort(name, cpu), pipeline(pipeline)
-        { }
-
-      protected:
-        bool recvTimingResp(PacketPtr pkt);
-
-        void recvReqRetry() override;
-    };
 
     class DcachePort : public CClassCPU::CClassCPUPort
     {
@@ -85,9 +68,9 @@ class Pipeline : public Ticked
         { }
 
       protected:
-        bool recvTimingResp(PacketPtr pkt) override;
+        virtual bool recvTimingResp(PacketPtr pkt) override;
 
-        void recvReqRetry() override;
+        virtual void recvReqRetry() override;
 
         bool isSnooping() const override;
 
@@ -97,7 +80,7 @@ class Pipeline : public Ticked
     };
 
     DcachePort dcachePort;
-    IcachePort icachePort;
+    //IcachePort icachePort;
 
   public:
     /** Enumerated ids of the 'stages' for the activity recorder */

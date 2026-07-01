@@ -54,6 +54,8 @@
 #include "cpu/cclass/dyn_inst.hh"
 #include "cpu/base.hh"
 
+#include "cpu/cclass/dyn_inst.hh"
+
 namespace gem5
 {
 
@@ -66,33 +68,53 @@ namespace cclass
                 PCGenRunning,
                 PCWaitingForChange,    
             };
-  struct Fetch1ThreadInfo
+  class Fetch1ThreadInfo
   {
-    Fetch1ThreadInfo() {}
+    public:
+    Fetch1ThreadInfo() = default;
 
     Fetch1ThreadInfo(const Fetch1ThreadInfo& other) :
-    state(other.state),
-    pc(other.pc->clone()),
-    streamSeqNum(other.streamSeqNum),
-    predictionSeqNum(other.predictionSeqNum),
-    blocked(other.blocked)
-    {}
+        bubbleFlag(other.bubbleFlag),
+        state(other.state),
+        streamSeqNum(other.streamSeqNum),
+        predictionSeqNum(other.predictionSeqNum),
+        blocked(other.blocked),
+        wakeupGuard(other.wakeupGuard),
+        FetchAddr(other.FetchAddr),
+        tid(other.tid)
+    {
+        if (other.pc)
+            set(pc,other.pc);
+    }
     Fetch1State state = PCWaitingForChange;
-
+    bool bubbleFlag = true;
     std::unique_ptr<PCStateBase> pc;
-
     InstSeqNum streamSeqNum = InstId::firstStreamSeqNum;
-
     InstSeqNum predictionSeqNum = InstId::firstPredictionSeqNum;
-
     bool blocked = false;
-
     bool wakeupGuard = false;
-    //The Address we are fetching lines from
     Addr FetchAddr = 0;
-    };
+    ThreadID tid = 0;
 
-    class ForwardLineData{
+
+    static Fetch1ThreadInfo bubble()
+    {
+        return Fetch1ThreadInfo();
+    }
+
+    bool isBubble() const
+    {
+        return bubbleFlag;
+    }
+
+    void makeValid()
+    {
+        bubbleFlag = false;
+    }
+
+  };
+
+class ForwardLineData{
         private:
     /** This line is a bubble.  No other data member is required to be valid
      *  if this is true
@@ -185,12 +207,6 @@ namespace cclass
 /** Maximum number of instructions that can be carried by the pipeline. */
 const unsigned int MAX_FORWARD_INSTS = 16;
 
-
-
-
-
-
-    }
 } // namespace minor
 } // namespace gem5
 
