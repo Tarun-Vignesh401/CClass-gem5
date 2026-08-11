@@ -207,6 +207,165 @@ class ForwardLineData{
 /** Maximum number of instructions that can be carried by the pipeline. */
 const unsigned int MAX_FORWARD_INSTS = 16;
 
+
+
+class ForwardInstData /* : public ReportIF, public BubbleIF */
+{
+  public:
+    /** Array of carried insts, ref counted */
+    CClassDynInstPtr insts[MAX_FORWARD_INSTS];
+
+    /** The number of insts slots that can be expected to be valid insts */
+    unsigned int numInsts;
+
+    /** Thread associated with these instructions */
+    ThreadID threadId;
+
+  public:
+    explicit ForwardInstData(unsigned int width = 0,
+                             ThreadID tid = InvalidThreadID);
+
+    ForwardInstData(const ForwardInstData &src);
+
+  public:
+    /** Number of instructions carried by this object */
+    unsigned int width() const { return numInsts; }
+
+    /** Copy the inst array only as far as numInsts */
+    ForwardInstData &operator =(const ForwardInstData &src);
+
+    /** Resize a bubble/empty ForwardInstData and fill with bubbles */
+    void resize(unsigned int width);
+
+    /** Fill with bubbles from 0 to width() - 1 */
+    void bubbleFill();
+
+    /** BubbleIF interface */
+    bool isBubble() const;
+
+    /** ReportIF interface */
+    //void reportData(std::ostream &os) const;
+};
+
+
+class BranchData /* : public ReportIF, public BubbleIF */
+{
+  public:
+    enum Reason
+    {
+        /* *** No change of stream (information to branch prediction) */
+
+        /* Don't branch at all (bubble) */
+        NoBranch,
+        /* Don't branch, but here's the details of a correct prediction
+         * that was executed */
+        CorrectlyPredictedBranch,
+
+        /* *** Change of stream */
+
+        /* Take an unpredicted branch */
+        UnpredictedBranch,
+        /* Take a branch on branch prediction data (from Fetch2) */
+        BranchPrediction,
+        /* Prediction of wrong target PC */
+        BadlyPredictedBranchTarget,
+        /* Bad branch prediction (didn't actually branch).  Need to branch
+         *  back to correct stream.  If the target is wrong, use
+         *  BadlyPredictedBranchTarget */
+        BadlyPredictedBranch,
+        /* Suspend fetching for this thread (inst->id.threadId).
+         * This will be woken up by another stream changing branch so
+         * count it as stream changing itself and expect pc to be the PC
+         * of the next instruction */
+        SuspendThread,
+        /* Branch from an interrupt (no instruction) */
+        Interrupt,
+        /* Stop fetching in anticipation of of draining */
+        HaltFetch
+    };
+
+    /** Is a request with this reason actually a request to change the
+     *  PC rather than a bubble or branch prediction information */
+    static bool isStreamChange(const BranchData::Reason reason);
+
+    /** Is a request with this reason actually a 'real' branch, that is,
+     *  a stream change that's not just an instruction to Fetch1 to halt
+     *  or wake up */
+    static bool isBranch(const BranchData::Reason reason);
+
+  public:
+    /** Explanation for this branch */
+    Reason reason = NoBranch;
+
+    /** ThreadID associated with branch */
+    ThreadID threadId = InvalidThreadID;
+
+    /** Sequence number of new stream/prediction to be adopted */
+    InstSeqNum newStreamSeqNum = 0;
+    InstSeqNum newPredictionSeqNum = 0;
+
+    /** Starting PC of that stream */
+    std::unique_ptr<PCStateBase> target;
+
+    /** Instruction which caused this branch */
+    CClassDynInstPtr inst = CClassDynInst::bubble();
+
+  public:
+    BranchData() {}
+
+    BranchData(Reason reason_, ThreadID thread_id,
+            InstSeqNum new_stream_seq_num, InstSeqNum new_prediction_seq_num,
+            const PCStateBase &_target, CClassDynInstPtr inst_) :
+        reason(reason_), threadId(thread_id),
+        newStreamSeqNum(new_stream_seq_num),
+        newPredictionSeqNum(new_prediction_seq_num),
+        inst(inst_)
+    {
+        set(target, _target);
+    }
+
+    BranchData(const BranchData &other) :
+        reason(other.reason), threadId(other.threadId),
+        newStreamSeqNum(other.newStreamSeqNum),
+        newPredictionSeqNum(other.newPredictionSeqNum),
+        inst(other.inst)
+    {
+        set(target, other.target);
+    }
+    BranchData &
+    operator=(const BranchData &other)
+    {
+        reason = other.reason;
+        threadId = other.threadId;
+        newStreamSeqNum = other.newStreamSeqNum;
+        newPredictionSeqNum = other.newPredictionSeqNum;
+        set(target, other.target);
+        inst = other.inst;
+        return *this;
+    }
+
+    /** BubbleIF interface */
+    static BranchData bubble() { return BranchData(); }
+    bool isBubble() const { return reason == NoBranch; }
+
+    /** As static isStreamChange but on this branch data */
+    bool isStreamChange() const { return isStreamChange(reason); }
+
+    /** As static isBranch but on this branch data */
+    bool isBranch() const { return isBranch(reason); }
+
+    /** ReportIF interface */
+    void reportData(std::ostream &os) const;
+};
+
+/** Print a branch reason enum */
+std::ostream &operator <<(std::ostream &os, BranchData::Reason reason);
+
+/** Print BranchData contents in a format suitable for DPRINTF comments, not
+ *  for CClassTrace */
+std::ostream &operator <<(std::ostream &os, const BranchData &branch);
+
+
 } // namespace minor
 } // namespace gem5
 

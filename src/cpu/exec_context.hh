@@ -1,59 +1,64 @@
-
-
 /**
  * @file
  *
- *  ExecContext bears the exec_context interface for Minor.
+ * ExecContext interface used by the CClass pipeline.
  */
 
-#ifndef __CPU_MINOR_EXEC_CONTEXT_HH__
-#define __CPU_MINOR_EXEC_CONTEXT_HH__
+#ifndef __CPU_CCLASS_EXEC_CONTEXT_HH__
+#define __CPU_CCLASS_EXEC_CONTEXT_HH__
 
-#include "cpu/base.hh"
+#include <memory>
+#include <vector>
+
+#include "base/logging.hh"
+#include "base/types.hh"
+#include "cpu/cclass/cpu.hh"
+#include "cpu/cclass/dyn_inst.hh"
 #include "cpu/exec_context.hh"
-#include "cpu/minor/execute.hh"
-#include "cpu/minor/pipeline.hh"
 #include "cpu/simple_thread.hh"
-#include "debug/MinorExecute.hh"
+#include "cpu/static_inst.hh"
+#include "mem/packet.hh"
 #include "mem/request.hh"
 
 namespace gem5
 {
 
-namespace minor
+namespace cclass
 {
 
-/* Forward declaration of Execute */
 class Execute;
 
-/** ExecContext bears the exec_context interface for Minor.  This nicely
- *  separates that interface from other classes such as Pipeline, MinorCPU
- *  and DynMinorInst and makes it easier to see what state is accessed by it.
- */
+struct ForwardingSource
+{
+    bool valid = false;
+    const StaticInst *staticInst = nullptr;
+    unsigned int destIndex = 0;
+    RegVal value = 0;
+};
+
+struct RiscvControlResolution
+{
+    bool isControl = false;
+    bool resolved = false;
+    bool taken = false;
+    std::unique_ptr<PCStateBase> target;
+};
+
 class ExecContext : public gem5::ExecContext
 {
   public:
-    MinorCPU &cpu;
-
-    /** ThreadState object, provides all the architectural state. */
+    CClassCPU &cpu;
     SimpleThread &thread;
-
-    /** The execute stage so we can peek at its contents. */
     Execute &execute;
+    CClassDynInstPtr inst;
 
-    /** Instruction for the benefit of memory operations and for PC */
-    MinorDynInstPtr inst;
-
-    ExecContext (
-        MinorCPU &cpu_,
-        SimpleThread &thread_, Execute &execute_,
-        MinorDynInstPtr inst_) :
+    ExecContext(CClassCPU &cpu_, SimpleThread &thread_, Execute &execute_,
+                CClassDynInstPtr inst_) :
         cpu(cpu_),
         thread(thread_),
         execute(execute_),
         inst(inst_)
     {
-        DPRINTF(MinorExecute, "ExecContext setting PC: %s\n", *inst->pc);
         pcState(*inst->pc);
         setPredicate(inst->readPredicate());
         setMemAccPredicate(inst->readMemAccPredicate());
@@ -65,329 +70,163 @@ class ExecContext : public gem5::ExecContext
         inst->setMemAccPredicate(readMemAccPredicate());
     }
 
-    Fault
-    initiateMemRead(Addr addr, unsigned int size,
-                    Request::Flags flags,
-                    const std::vector<bool>& byte_enable) override
-    {
-        assert(byte_enable.size() == size);
-        return execute.getLSQ().pushRequest(inst, true /* load */, nullptr,
-            size, addr, flags, nullptr, nullptr, byte_enable);
-    }
+    bool readSourceWithForwarding(const StaticInst *si, int src_idx,
+        const std::vector<ForwardingSource> &mem_exe_forwards,
+        const std::vector<ForwardingSource> &mem_wb_forwards,
+        RegVal &value) const;
 
-    Fault
-    initiateMemMgmtCmd(Request::Flags flags) override
+    bool resolveRiscvControl(const StaticInst *si,
+        const std::vector<ForwardingSource> &mem_exe_forwards,
+        const std::vector<ForwardingSource> &mem_wb_forwards,
+        RiscvControlResolution &resolution) const;
+
+    Fault initiateMemRead(Addr addr, unsigned int size, Request::Flags flags,
+        const std::vector<bool> &byte_enable) override
     {
-        panic("ExecContext::initiateMemMgmtCmd() not implemented "
-              " on MinorCPU\n");
+        panic("CClass ExecContext::initiateMemRead is not wired to an LSQ yet\n");
         return NoFault;
     }
 
-    Fault
-    writeMem(uint8_t *data, unsigned int size, Addr addr,
-             Request::Flags flags, uint64_t *res,
-             const std::vector<bool>& byte_enable)
-        override
+    Fault initiateMemMgmtCmd(Request::Flags flags) override
     {
-        assert(byte_enable.size() == size);
-        return execute.getLSQ().pushRequest(inst, false /* store */, data,
-            size, addr, flags, res, nullptr, byte_enable);
+        panic("CClass ExecContext::initiateMemMgmtCmd is not implemented\n");
+        return NoFault;
     }
 
-    Fault
-    initiateMemAMO(Addr addr, unsigned int size, Request::Flags flags,
-                   AtomicOpFunctorPtr amo_op) override
+    Fault writeMem(uint8_t *data, unsigned int size, Addr addr,
+        Request::Flags flags, uint64_t *res,
+        const std::vector<bool> &byte_enable) override
     {
-        // AMO requests are pushed through the store path
-        return execute.getLSQ().pushRequest(inst, false /* amo */, nullptr,
-            size, addr, flags, nullptr, std::move(amo_op),
-            std::vector<bool>(size, true));
+        panic("CClass ExecContext::writeMem is not wired to an LSQ yet\n");
+        return NoFault;
     }
 
-    RegVal
-    getRegOperand(const StaticInst *si, int idx) override
+    Fault initiateMemAMO(Addr addr, unsigned int size, Request::Flags flags,
+        AtomicOpFunctorPtr amo_op) override
+    {
+        panic("CClass ExecContext::initiateMemAMO is not wired to an LSQ yet\n");
+        return NoFault;
+    }
+
+    RegVal getRegOperand(const StaticInst *si, int idx) override
     {
         const RegId &reg = si->srcRegIdx(idx);
-        int tid = thread.threadId();
-        if (reg.is(InvalidRegClass))
-            return 0;
-        switch (reg.classValue()) {
-            case IntRegClass:
-                cpu.executeStats[tid]->numIntRegReads++;
-                break;
-            case FloatRegClass:
-                cpu.executeStats[tid]->numFpRegReads++;
-                break;
-            case CCRegClass:
-                cpu.executeStats[tid]->numCCRegReads++;
-                break;
-            case VecRegClass:
-            case VecElemClass:
-                cpu.executeStats[tid]->numVecRegReads++;
-                break;
-            case VecPredRegClass:
-                cpu.executeStats[tid]->numVecPredRegReads++;
-                break;
-            default:
-                break;
-        }
-        return thread.getReg(reg);
+        return reg.is(InvalidRegClass) ? 0 : thread.getReg(reg);
     }
 
-    void
-    getRegOperand(const StaticInst *si, int idx, void *val) override
+    void getRegOperand(const StaticInst *si, int idx, void *val) override
     {
-        const RegId &reg = si->srcRegIdx(idx);
-        int tid = thread.threadId();
-        switch (reg.classValue()) {
-            case IntRegClass:
-                cpu.executeStats[tid]->numIntRegReads++;
-                break;
-            case FloatRegClass:
-                cpu.executeStats[tid]->numFpRegReads++;
-                break;
-            case CCRegClass:
-                cpu.executeStats[tid]->numCCRegReads++;
-                break;
-            case VecRegClass:
-            case VecElemClass:
-                cpu.executeStats[tid]->numVecRegReads++;
-                break;
-            case VecPredRegClass:
-                cpu.executeStats[tid]->numVecPredRegReads++;
-                break;
-            default:
-                break;
-        }
-
         thread.getReg(si->srcRegIdx(idx), val);
     }
 
-    void *
-    getWritableRegOperand(const StaticInst *si, int idx) override
+    void *getWritableRegOperand(const StaticInst *si, int idx) override
     {
-        const RegId &reg = si->destRegIdx(idx);
-        int tid = thread.threadId();
-        switch (reg.classValue()) {
-            case VecRegClass:
-                cpu.executeStats[tid]->numVecRegWrites++;
-                break;
-            case VecPredRegClass:
-                cpu.executeStats[tid]->numVecPredRegWrites++;
-                break;
-            default:
-                break;
-        }
-        return thread.getWritableReg(reg);
+        return thread.getWritableReg(si->destRegIdx(idx));
     }
 
-    void
-    setRegOperand(const StaticInst *si, int idx, RegVal val) override
+    void setRegOperand(const StaticInst *si, int idx, RegVal val) override
     {
         const RegId &reg = si->destRegIdx(idx);
-        int tid = thread.threadId();
-        if (reg.is(InvalidRegClass))
-            return;
-        switch (reg.classValue()) {
-            case IntRegClass:
-                cpu.executeStats[tid]->numIntRegWrites++;
-                break;
-            case FloatRegClass:
-                cpu.executeStats[tid]->numFpRegWrites++;
-                break;
-            case CCRegClass:
-                cpu.executeStats[tid]->numCCRegWrites++;
-                break;
-            case VecRegClass:
-            case VecElemClass:
-                cpu.executeStats[tid]->numVecRegWrites++;
-                break;
-            case VecPredRegClass:
-                cpu.executeStats[tid]->numVecPredRegWrites++;
-                break;
-            default:
-                break;
-        }
+        if (!reg.is(InvalidRegClass))
+            thread.setReg(reg, val);
+    }
+
+    void setRegOperand(const StaticInst *si, int idx, const void *val) override
+    {
         thread.setReg(si->destRegIdx(idx), val);
     }
 
-    void
-    setRegOperand(const StaticInst *si, int idx, const void *val) override
-    {
-        const RegId &reg = si->destRegIdx(idx);
-        int tid = thread.threadId();
-        switch (reg.classValue()) {
-            case IntRegClass:
-                cpu.executeStats[tid]->numIntRegWrites++;
-                break;
-            case FloatRegClass:
-                cpu.executeStats[tid]->numFpRegWrites++;
-                break;
-            case CCRegClass:
-                cpu.executeStats[tid]->numCCRegWrites++;
-                break;
-            case VecRegClass:
-            case VecElemClass:
-                cpu.executeStats[tid]->numVecRegWrites++;
-                break;
-            case VecPredRegClass:
-                cpu.executeStats[tid]->numVecPredRegWrites++;
-                break;
-            default:
-                break;
-        }
-        thread.setReg(si->destRegIdx(idx), val);
-    }
+    bool readPredicate() const override { return thread.readPredicate(); }
+    void setPredicate(bool val) override { thread.setPredicate(val); }
 
-    bool
-    readPredicate() const override
-    {
-        return thread.readPredicate();
-    }
+    bool readMemAccPredicate() const override
+    { return thread.readMemAccPredicate(); }
 
-    void
-    setPredicate(bool val) override
-    {
-        thread.setPredicate(val);
-    }
+    void setMemAccPredicate(bool val) override
+    { thread.setMemAccPredicate(val); }
 
-    bool
-    readMemAccPredicate() const override
+    uint64_t getHtmTransactionUid() const override
     {
-        return thread.readMemAccPredicate();
-    }
-
-    void
-    setMemAccPredicate(bool val) override
-    {
-        thread.setMemAccPredicate(val);
-    }
-
-    // hardware transactional memory
-    uint64_t
-    getHtmTransactionUid() const override
-    {
-        panic("ExecContext::getHtmTransactionUid() not"
-              "implemented on MinorCPU\n");
+        panic("CClass ExecContext::getHtmTransactionUid is not implemented\n");
         return 0;
     }
 
-    uint64_t
-    newHtmTransactionUid() const override
+    uint64_t newHtmTransactionUid() const override
     {
-        panic("ExecContext::newHtmTransactionUid() not"
-              "implemented on MinorCPU\n");
+        panic("CClass ExecContext::newHtmTransactionUid is not implemented\n");
         return 0;
     }
 
-    bool
-    inHtmTransactionalState() const override
-    {
-        // ExecContext::inHtmTransactionalState() not
-        // implemented on MinorCPU
-        return false;
-    }
+    bool inHtmTransactionalState() const override { return false; }
 
-    uint64_t
-    getHtmTransactionalDepth() const override
+    uint64_t getHtmTransactionalDepth() const override
     {
-        panic("ExecContext::getHtmTransactionalDepth() not"
-              "implemented on MinorCPU\n");
+        panic("CClass ExecContext::getHtmTransactionalDepth is not implemented\n");
         return 0;
     }
 
-    const PCStateBase &
-    pcState() const override
-    {
-        return thread.pcState();
-    }
+    const PCStateBase &pcState() const override { return thread.pcState(); }
+    void pcState(const PCStateBase &val) override { thread.pcState(val); }
 
-    void
-    pcState(const PCStateBase &val) override
-    {
-        thread.pcState(val);
-    }
+    RegVal readMiscRegNoEffect(int misc_reg) const
+    { return thread.readMiscRegNoEffect(misc_reg); }
 
-    RegVal
-    readMiscRegNoEffect(int misc_reg) const
-    {
-        return thread.readMiscRegNoEffect(misc_reg);
-    }
+    RegVal readMiscReg(int misc_reg) override
+    { return thread.readMiscReg(misc_reg); }
 
-    RegVal
-    readMiscReg(int misc_reg) override
-    {
-        return thread.readMiscReg(misc_reg);
-    }
+    void setMiscReg(int misc_reg, RegVal val) override
+    { thread.setMiscReg(misc_reg, val); }
 
-    void
-    setMiscReg(int misc_reg, RegVal val) override
+    RegVal readMiscRegOperand(const StaticInst *si, int idx) override
     {
-        thread.setMiscReg(misc_reg, val);
-    }
-
-    RegVal
-    readMiscRegOperand(const StaticInst *si, int idx) override
-    {
-        const RegId& reg = si->srcRegIdx(idx);
+        const RegId &reg = si->srcRegIdx(idx);
         assert(reg.is(MiscRegClass));
         return thread.readMiscReg(reg.index());
     }
 
-    void
-    setMiscRegOperand(const StaticInst *si, int idx, RegVal val) override
+    void setMiscRegOperand(const StaticInst *si, int idx, RegVal val) override
     {
-        const RegId& reg = si->destRegIdx(idx);
+        const RegId &reg = si->destRegIdx(idx);
         assert(reg.is(MiscRegClass));
-        return thread.setMiscReg(reg.index(), val);
+        thread.setMiscReg(reg.index(), val);
     }
 
     ThreadContext *tcBase() const override { return thread.getTC(); }
 
-    /* @todo, should make stCondFailures persistent somewhere */
     unsigned int readStCondFailures() const override { return 0; }
     void setStCondFailures(unsigned int st_cond_failures) override {}
 
     ContextID contextId() { return thread.contextId(); }
-    /* ISA-specific (or at least currently ISA singleton) functions */
 
-    /* X86: TLB twiddling */
-    void
-    demapPage(Addr vaddr, uint64_t asn) override
+    void demapPage(Addr vaddr, uint64_t asn) override
     {
         thread.getMMUPtr()->demapPage(vaddr, asn);
     }
 
     BaseCPU *getCpuPtr() { return &cpu; }
 
-  public:
-    // monitor/mwait funtions
-    void
-    armMonitor(Addr address) override
+    void armMonitor(Addr address) override
     {
         getCpuPtr()->armMonitor(inst->id.threadId, address);
     }
 
-    bool
-    mwait(PacketPtr pkt) override
+    bool mwait(PacketPtr pkt) override
     {
         return getCpuPtr()->mwait(inst->id.threadId, pkt);
     }
 
-    void
-    mwaitAtomic(ThreadContext *tc) override
+    void mwaitAtomic(ThreadContext *tc) override
     {
-        return getCpuPtr()->mwaitAtomic(inst->id.threadId, tc, thread.mmu);
+        getCpuPtr()->mwaitAtomic(inst->id.threadId, tc, thread.mmu);
     }
 
-    AddressMonitor *
-    getAddrMonitor() override
+    AddressMonitor *getAddrMonitor() override
     {
         return getCpuPtr()->getCpuAddrMonitor(inst->id.threadId);
     }
 };
 
-} // namespace minor
+} // namespace cclass
 } // namespace gem5
 
-#endif /* __CPU_MINOR_EXEC_CONTEXT_HH__ */
+#endif /* __CPU_CCLASS_EXEC_CONTEXT_HH__ */

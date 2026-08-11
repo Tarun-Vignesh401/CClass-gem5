@@ -19,8 +19,13 @@
 
 namespace gem5
 {   
-    namespace cclass{
-        class InstId
+namespace cclass{
+    
+class CClassDynInst;
+
+typedef RefCountingPtr<CClassDynInst> CClassDynInstPtr;
+
+class InstId
 {
   public:
     /** First sequence numbers to use in initialisation of the pipeline and
@@ -93,21 +98,147 @@ namespace gem5
 
 };
 
-inline std::ostream &
-operator <<(std::ostream &os, const InstId &id)
+std::ostream &operator <<(std::ostream &os, const InstId &id);
+
+
+/** Print a short reference to this instruction.  '-' for a bubble and a
+ *  series of '/' separated sequence numbers for other instructions.  The
+ *  sequence numbers will be in the order: stream, prediction, line, fetch,
+ *  exec with exec absent if it is 0.  This is used by MinorTrace. */
+std::ostream &operator <<(std::ostream &os, const CClassDynInst &inst);
+
+/** Dynamic instruction for Minor.
+ *  CClassDynInst implements the BubbleIF interface
+ *  Has two separate notions of sequence number for pre/post-micro-op
+ *  decomposition: fetchSeqNum and execSeqNum */
+class CClassDynInst : public RefCounted
 {
-    os << id.threadId << '/' << id.streamSeqNum << '.'
-        << id.predictionSeqNum << '/' << id.lineSeqNum;
+  private:
+    /** A prototypical bubble instruction.  You must call CClassDynInst::init
+     *  to initialise this */
+    static CClassDynInstPtr bubbleInst;
 
-    /* Not all structures have fetch and exec sequence numbers */
-    if (id.fetchSeqNum != 0) {
-        os << '/' << id.fetchSeqNum;
-        if (id.execSeqNum != 0)
-            os << '.' << id.execSeqNum;
-    }
+  public:
+    const StaticInstPtr staticInst;
 
-    return os;
-}
+    InstId id;
+
+    /** Trace information for this instruction's execution */
+    trace::InstRecord *traceData = nullptr;
+
+    /** The fetch address of this instruction */
+    std::unique_ptr<PCStateBase> pc;
+
+    /** This is actually a fault masquerading as an instruction */
+    Fault fault;
+
+    /** Tried to predict the destination of this inst (if a control
+     *  instruction or a sys call) */
+    bool triedToPredict = false;
+
+    /** This instruction was predicted to change control flow and
+     *  the following instructions will have a newer predictionSeqNum */
+    bool predictedTaken = false;
+
+    /** Predicted branch target */
+    std::unique_ptr<PCStateBase> predictedTarget;
+
+    /** Fields only set during execution */
+
+    /** FU this instruction is issued to */
+    unsigned int fuIndex = 0;
+
+    /** This instruction is in the LSQ, not a functional unit */
+    bool inLSQ = false;
+
+    /** Translation fault in case of a mem ref */
+    Fault translationFault;
+
+    /** The instruction has been sent to the store buffer */
+    bool inStoreBuffer = false;
+
+    /** Can this instruction be executed out of order.  In this model,
+     *  this only happens with mem refs that need to be issued early
+     *  to allow other instructions to fill the fetch delay */
+    bool canEarlyIssue = false;
+
+    /** Flag controlling conditional execution of the instruction */
+    bool predicate = true;
+
+    /** Flag controlling conditional execution of the memory access associated
+     *  with the instruction (only meaningful for loads/stores) */
+    bool memAccPredicate = true;
+
+    /** execSeqNum of the latest inst on which this inst depends.
+     *  This can be used as a sanity check for dependency ordering
+     *  where slightly out of order execution is required (notably
+     *  initiateAcc for memory ops) */
+    InstSeqNum instToWaitFor = 0;
+
+    /** Extra delay at the end of the pipeline */
+    Cycles extraCommitDelay{0};
+    TimingExpr *extraCommitDelayExpr = nullptr;
+
+    /** Once issued, extraCommitDelay becomes minimumCommitCycle
+     *  to account for delay in absolute time */
+    Cycles minimumCommitCycle{0};
+
+    /** Flat register indices so that, when clearing the scoreboard, we
+     *  have the same register indices as when the instruction was marked
+     *  up */
+    std::vector<RegId> flatDestRegIdx;
+
+  public:
+    CClassDynInst(StaticInstPtr si, InstId id_=InstId(), Fault fault_=NoFault) :
+        staticInst(si), id(id_), fault(fault_), translationFault(NoFault),
+        flatDestRegIdx(si ? si->numDestRegs() : 0)
+    { }
+
+  public:
+    /** The BubbleIF interface. */
+    bool isBubble() const { return id.fetchSeqNum == 0; }
+
+    /** There is a single bubble inst */
+    static CClassDynInstPtr bubble() { return bubbleInst; }
+
+    /** Is this a fault rather than instruction */
+    bool isFault() const { return fault != NoFault; }
+
+    /** Is this a real instruction */
+    bool isInst() const { return !isBubble() && !isFault(); }
+
+    /** Is this a real mem ref instruction */
+    bool isMemRef() const { return isInst() && staticInst->isMemRef(); }
+
+    /** Is this an instruction that can be executed `for free' and
+     *  needn't spend time in an FU */
+    bool isNoCostInst() const;
+
+    /** Assuming this is not a fault, is this instruction either
+     *  a whole instruction or the last microop from a macroop */
+    bool isLastOpInInst() const;
+
+    /** Print (possibly verbose) instruction information for
+     *  MinorTrace using the given Named object's name */
+    void cclassTraceInst(const Named &named_object) const;
+
+    /** ReportIF interface */
+    void reportData(std::ostream &os) const;
+
+    bool readPredicate() const { return predicate; }
+
+    void setPredicate(bool val) { predicate = val; }
+
+    bool readMemAccPredicate() const { return memAccPredicate; }
+
+    void setMemAccPredicate(bool val) { memAccPredicate = val; }
+
+    ~CClassDynInst();
+};
+
+/** Print a summary of the instruction */
+std::ostream &operator <<(std::ostream &os, const CClassDynInst &inst);
+
 
 } //namespace cclass
 } //namespace gem5 

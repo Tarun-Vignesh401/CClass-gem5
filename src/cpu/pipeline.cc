@@ -3,8 +3,8 @@
 
 #include <algorithm>
 
-//#include "cpu/minor/decode.hh"
-//#include "cpu/minor/execute.hh"
+#include "cpu/cclass/decode.hh"
+#include "cpu/cclass/execute.hh"
 #include "cpu/cclass/fetch1.hh"
 #include "cpu/cclass/fetch2.hh"
 //#include "debug/Drain.hh" // auto - generated stuff
@@ -23,23 +23,27 @@ Pipeline::Pipeline(CClassCPU &cpu_, const BaseCClassCPUParams &params) :
     cpu(cpu_),
     //allow_idling(params.enableIdling),
     f1ToF2(cpu.name() + ".f1ToF2", "lines",params.fetch1ToFetch2ForwardDelay),
-    
     f2ToD(cpu.name() + ".f2ToD", "insts",
         params.fetch2ToDecodeForwardDelay),
-    /*dToE(cpu.name() + ".dToE", "insts",
+    dToE(cpu.name() + ".dToE", "insts",
         params.decodeToExecuteForwardDelay),
     eToF1(cpu.name() + ".eToF1", "branch",
         params.executeBranchDelay),
+    eToF2(cpu.name() + ".eToF2", "branch",
+        params.executeBranchDelay),
+    eToD(cpu.name() + ".eToD", "branch",
+        params.executeBranchDelay),
+    // for now executeBranchDelay
+    eToM(cpu.name() + ".eToM", "branch",
+        params.executeToMemoryForwardDelay),
+    exe_buffer(makeExeBuffer(cpu.name(), params)),
+    //memory(cpu,.name()+ ".execute", cpu, params),
     execute(cpu.name() + ".execute", cpu, params,
-        dToE.output(), eToF1.input()),
-    decode(cpu.name() + ".decode", cpu, params,
-        f2ToD.output(), dToE.input(), execute.inputBuffer),*/
-    decode(cpu.name() + ".decode", cpu, params,f2ToD.output()),
+        dToE.output(),eToF1.input(),eToF2.input(),eToD.input(),eToM.input(),exe_buffer),
+    decode(cpu.name() + ".decode", cpu, params,f2ToD.output(),dToE.input(),execute.inputBuffer),
     fetch2(cpu.name() + ".fetch2", cpu, params, f1ToF2.output(),
         f2ToD.input(),decode.inputBuffer),
-    fetch1(cpu.name() + ".fetch1", cpu, params, f1ToF2.input(), fetch2.inputBuffer),
-    dcachePort(cpu.name() + ".dcache_port", *this, cpu)
-    //icachePort(cpu.name() + ".icache_port", *this, cpu)
+    fetch1(cpu.name() + ".fetch1", cpu, params, f1ToF2.input(), fetch2.inputBuffer)
     /*activityRecorder(cpu.name() + ".activity", Num_StageId,
       *   The max depth of inter-stage FIFOs 
       *   std::max(params.fetch1ToFetch2ForwardDelay,
@@ -90,20 +94,29 @@ Pipeline::evaluate()
 {   
     /** We tick the CPU to update the BaseCPU cycle counters */
     cpu.tick();
-
     /* Note that it's important to evaluate the stages in order to allow
      *  'immediate', 0-time-offset TimeBuffer activity to be visible from
      *  later stages to earlier ones in the same cycle */
     //execute.evaluate();
-    //decode.evaluate();
     fetch1.evaluate();
+    //std::cout<<"I am in fetch1!\n";
+
     fetch2.evaluate();
+    //std::cout<<"I am in fetch2!!\n";
+
+    decode.evaluate();
+     //std::cout<<"I am in decode !!\n";
+
+    execute.evaluate();
+
     //std::cout << "current cycle : " << cpu.curCycle() << "\n";
     /*if (debug::MinorTrace)
         minorTrace();*/
     //Update the time buffers after the stages 
     f1ToF2.evaluate();
     f2ToD.evaluate();
+    dToE.evaluate();
+    eToM.evaluate();
 
     //fetch2.finaldebugprint();
 
@@ -158,7 +171,7 @@ Pipeline::getInstPort()
 CClassCPU::CClassCPUPort &
 Pipeline::getDataPort()
 {
-    return dcachePort;
+    return execute.dcachePort;
 }
 
 void
@@ -226,30 +239,21 @@ Pipeline::isDrained()
 
     return ret;
 }*/
-
-// Icache and Dcache port methods right here
-
-bool
-Pipeline::DcachePort::recvTimingResp(PacketPtr pkt) {
-    return 1;
-}
-void
-Pipeline::DcachePort::recvReqRetry() 
+// temporarily for making the exec buffer..
+std::vector<InputBuffer<ForwardInstData>>
+Pipeline::makeExeBuffer(const std::string &name, const BaseCClassCPUParams &params)
 {
-   std::cout << "recvReqRetry called" << std::endl;
-}
-bool
-Pipeline::DcachePort::isSnooping() const {
-    return 0;
-}
+    std::vector<InputBuffer<ForwardInstData>> ret;
 
-void Pipeline::DcachePort::recvTimingSnoopReq(PacketPtr pkt){
-    std::cout << "recvTimingSnoopReq called" << std::endl;
-}
- void Pipeline::DcachePort::recvFunctionalSnoop(PacketPtr pkt) {
+    for (ThreadID tid = 0; tid < params.numThreads; tid++) {
+        ret.emplace_back(
+            name + ".exeBuffer" + std::to_string(tid),
+            "insts",
+            params.executeInputBufferSize);
+    }
 
-        std::cout << "recvFunctionalSnoop called" << std::endl;    
- };
+    return ret;
+}
 
 } // namespace minor
 } // namespace gem5

@@ -11,7 +11,7 @@
 //#include "cpu/cclass/activity.hh"
 #include "cpu/cclass/cpu.hh"
 #include "cpu/cclass/decode.hh"
-//#include "cpu/cclass/execute.hh"
+#include "cpu/cclass/execute.hh"
 #include "cpu/cclass/fetch1.hh"
 #include "cpu/cclass/fetch2.hh"
 #include "params/BaseCClassCPU.hh"
@@ -41,12 +41,17 @@ class Pipeline : public Ticked
     //bool allow_idling;
 
     Latch<Fetch1ThreadInfo> f1ToF2;
-    //Latch<BranchData> f2ToF1;
     Latch<ForwardLineData> f2ToD;
-    //Latch<ForwardInstData> dToE;
-    //Latch<BranchData> eToF1;
+    Latch<ForwardInstData> dToE;
+    Latch<BranchData> eToF1;
+    Latch<BranchData> eToF2;
+    Latch<BranchData> eToD;
+    Latch<ForwardInstData> eToM;
 
-    //Execute execute;
+
+    std::vector<InputBuffer<ForwardInstData>> exe_buffer;
+
+    Execute execute;
     Decode decode;
     Fetch2 fetch2;
     Fetch1 fetch1;
@@ -54,34 +59,7 @@ class Pipeline : public Ticked
     /** Activity recording for the pipeline.  This is access through the CPU
      *  by the pipeline stages but belongs to the Pipeline as it is the
      *  cleanest place to initialise it */
-    //MinorActivityRecorder activityRecorder;
-
-    class DcachePort : public CClassCPU::CClassCPUPort
-    {
-      protected:
-        /** My owner */
-      Pipeline &pipeline;
-
-      public:
-        DcachePort(std::string name, Pipeline &pipeline, CClassCPU &cpu) :
-            CClassCPU::CClassCPUPort(name, cpu), pipeline(pipeline)
-        { }
-
-      protected:
-        virtual bool recvTimingResp(PacketPtr pkt) override;
-
-        virtual void recvReqRetry() override;
-
-        bool isSnooping() const override;
-
-        void recvTimingSnoopReq(PacketPtr pkt) override;
-
-        void recvFunctionalSnoop(PacketPtr pkt) override;
-    };
-
-    DcachePort dcachePort;
-    //IcachePort icachePort;
-
+    //MinorActivityRecorder activityRecorder; 
   public:
     /** Enumerated ids of the 'stages' for the activity recorder */
     enum StageId
@@ -103,6 +81,9 @@ class Pipeline : public Ticked
     /** Wake up the Fetch unit.  This is needed on thread activation esp.
      *  after quiesce wakeup */
     void wakeupFetch(ThreadID tid);
+
+    static std::vector<InputBuffer<ForwardInstData>> makeExeBuffer(const std::string &name, const BaseCClassCPUParams &params);
+
 
     /** Try to drain the CPU */
     //bool drain();

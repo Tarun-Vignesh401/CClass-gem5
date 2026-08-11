@@ -122,8 +122,6 @@ CClassCPU::startup()
     //for now only single thread 
    //for (ThreadID tid = 0; tid < numThreads; tid++)
     pipeline->wakeupFetch(0);
-    //std::cout << "pipeline started ...\n";
-
     
 }
 

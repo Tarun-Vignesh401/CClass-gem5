@@ -51,7 +51,16 @@ namespace gem5
         InstSeqNum lineSeqNum;
 
         ThreadID threadPriority;
+        //I don't need it right now let's see if I need it later.
+        const Fetch1ThreadInfo* fetch2_thread;
 
+        enum Fetch2State{
+                FetchRunning,
+                FetchHalt,
+                FetchWaiting             
+        };
+
+        Fetch2State fetchState;
 
         void fetchLine(ThreadID tid, const Fetch1ThreadInfo* thread);
         
@@ -164,6 +173,7 @@ namespace gem5
 
         /** Retry state of icache_port */
         IcacheState icacheState;
+        
         
         void processResponse(FetchRequestPtr response, ForwardLineData &line,const Fetch1ThreadInfo* thread);
 

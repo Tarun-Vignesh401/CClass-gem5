@@ -67,7 +67,7 @@ namespace gem5
     thread.wakeupGuard = true;
     thread.makeValid();
     DPRINTF(CClassFetch, "[tid:%d]: Changing stream wakeup %s\n", tid, *thread.pc);
-
+    assert(thread_ctx != nullptr);
     cpu.wakeupOnEvent(Pipeline::Fetch1StageId);
     }
     void 
@@ -143,10 +143,11 @@ void Fetch1::evaluate(){
     //std::cout<< "size of fetchInfo"<< fetchInfo.size() <<"\n";
     for (ThreadID tid = 0; tid < cpu.numThreads; tid++){
         fetchInfo[tid].blocked = !nextStageReserve[tid].canReserve();
-        if(nextStageReserve[tid].canReserve()){
+        if(nextStageReserve[tid].canReserve() && fetchInfo[tid].pc){
             nextStageReserve[tid].reserve();
-            Fetch1::advancepc(tid);
             processResponse(out_thread,fetchInfo[tid]);
+            Fetch1::advancepc(tid);
+
         }
         else{
             //DPRINTF(CClassCPU,"PC generation halted\n");

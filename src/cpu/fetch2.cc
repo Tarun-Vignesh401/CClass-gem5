@@ -29,8 +29,9 @@ Fetch2::Fetch2(const std::string &name_, CClassCPU &cpu_,
     lineSnap(params.fetch2LineSnapWidth),
     maxLineWidth(params.fetch2LineWidth),
     fetchLimit(params.fetch1FetchLimit),
-    //fetchInfo(params.numThreads),
+    fetch2_thread(nullptr),
     threadPriority(0),
+    fetchState(FetchWaiting),
     requests(name_ + ".requests", "lines", params.fetch1FetchLimit),
     transfers(name_ + ".transfers", "lines", params.fetch1FetchLimit),
     icacheState(IcacheRunning),
@@ -80,9 +81,7 @@ Fetch2::fetchLine(ThreadID tid,const Fetch1ThreadInfo* thread)
     /* If line_offset != 0, a request is pushed for the remainder of the
      * line. */
     /* Use a lower, sizeof(MachInst) aligned address for the fetch */
-    Addr aligned_pc = thread->FetchAddr & ~((Addr) lineSnap - 1);
-    unsigned int line_offset = aligned_pc % lineSnap;
-    //unsigned int request_size = maxLineWidth - line_offset;
+    Addr aligned_pc = thread->FetchAddr & ~((Addr)4 - 1);
     unsigned int request_size = 4;
 
     /* Fill in the line's id */
@@ -364,32 +363,35 @@ Fetch2::processResponse(Fetch2::FetchRequestPtr response,
 void 
 Fetch2::evaluate(){
     ThreadID fetch_tid = in_thread.outputWire->tid;
-    const Fetch1ThreadInfo* thread = getInput(fetch_tid);
+    //const Fetch1ThreadInfo* thread = getInput(fetch_tid);
+    if( fetchState == FetchWaiting ){
+            fetch2_thread = getInput(fetch_tid);
+    }
 
-if (!in_thread.outputWire->isBubble()){
+    if (!in_thread.outputWire->isBubble()){
         inputBuffer[fetch_tid].setTail(*in_thread.outputWire);
         DPRINTF(CClassCPU,"you have set to the inputBuffer !!\n");
     }
-
-if(thread)
-{
+if(fetch2_thread)
+{   
     //DPRINTF(CClassCPU, "fetch2 is evaluating thread %d\n", fetch_tid);
 
     ForwardLineData &line_out = *out.inputWire;
   
     if (fetch_tid != InvalidThreadID) {
             //DPRINTF(CClassCPU, "Fetching from thread %d\n", fetch_tid);
-            if(numInFlightFetches() < fetchLimit){
+            if(numInFlightFetches() < fetchLimit && (fetchState == FetchWaiting)){
             /* Generate fetch to selected thread */
-            finaldebugprint(fetch_tid,thread);
-            fetchLine(fetch_tid,thread);
-            popInput(fetch_tid);
+            finaldebugprint(fetch_tid,fetch2_thread);
+            fetchLine(fetch_tid,fetch2_thread);
+            //popInput(fetch_tid);
 
             /* Take up a slot in the fetch queue */
             nextStageReserve[fetch_tid].reserve();
+            fetchState = FetchRunning;
             }
     }
-
+    /*Tries to move FetchRequest from requests to transfers queue*/
     stepQueues();
 
     
@@ -414,13 +416,16 @@ if(thread)
             DPRINTF(CClassCPU, "Processing fetched line: %d\n"
                ,response->id);
 
-            processResponse(response, line_out,thread);
+            processResponse(response,line_out,fetch2_thread);
+            fetchState = FetchWaiting;
+            std::cout << "I have set it to FetchWaiting \n";
+            popInput(fetch_tid);
 
         }
         popAndDiscard(transfers);
-        //popInput(fetch_tid);
     }
-}
+      
+}//if(thread)...
 if (!in_thread.outputWire->isBubble()){
         DPRINTF(CClassCPU,"you have pushed to the inputBuffer !!\n");
         inputBuffer[fetch_tid].pushTail();
