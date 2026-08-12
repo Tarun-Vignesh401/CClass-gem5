@@ -37,7 +37,7 @@ class Execute : public Named
     Latch<BranchData>::Input out_decode;
     Latch<ForwardInstData>::Input out_mem;
 
-    std::vector<InputBuffer<ForwardInstData>> nextStageReserve;
+    std::vector<InputBuffer<ForwardInstData>> &nextStageReserve;
 
 
     /** Pointer back to the containing CPU */

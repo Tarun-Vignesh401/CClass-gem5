@@ -84,7 +84,6 @@ class Pipeline : public Ticked
 
     static std::vector<InputBuffer<ForwardInstData>> makeExeBuffer(const std::string &name, const BaseCClassCPUParams &params);
 
-
     /** Try to drain the CPU */
     //bool drain();
 

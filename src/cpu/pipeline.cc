@@ -89,6 +89,7 @@ Pipeline::minorTrace() const
     activityRecorder.minorTrace();
 }
 */
+
 void
 Pipeline::evaluate()
 {   
@@ -117,7 +118,6 @@ Pipeline::evaluate()
     f2ToD.evaluate();
     dToE.evaluate();
     eToM.evaluate();
-
     //fetch2.finaldebugprint();
 
     //std::cout << "you've entered evaluate of fetch2!"<<std::endl;

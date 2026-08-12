@@ -115,7 +115,7 @@ class CClassFUPool(SimObject):
 class CClassDefaultIntFU(CClassFU):
     opClasses = cclassMakeOpClassSet(["IntAlu"])
     timings = [CClassFUTiming(description="Int", srcRegsRelativeLats=[2])]
-    opLat = 3
+    opLat = 1
 
 class CClassDefaultIntMulFU(CClassFU):
     opClasses = cclassMakeOpClassSet(["IntMult"])

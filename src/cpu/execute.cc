@@ -151,6 +151,8 @@ Execute::popInput(ThreadID tid)
 {
     if (!inputBuffer[tid].empty())
         inputBuffer[tid].pop();
+    
+    executeInfo[tid].inputIndex = 0;
 
 }
 
@@ -294,8 +296,6 @@ Execute::getInput(ThreadID tid){
         return NULL;
     } 
 }
-
-
 
 unsigned int
 Execute::issue(ThreadID thread_id)
@@ -619,9 +619,9 @@ Execute::trytoPush(ThreadID tid, unsigned int output_index){
 
     if (inst->isBubble())
         return;
-
-    if (!nextStageReserve[tid].canReserve())
-        return;
+    //temporarilu
+    //if (!nextStageReserve[tid].canReserve())
+        //return;
 
     bool inst_ready = false; 
     bool isbubble = inst->isNoCostInst();
@@ -635,18 +635,32 @@ Execute::trytoPush(ThreadID tid, unsigned int output_index){
             fu_head.inst->id == inst->id;
         
         if(inst_ready){
-            nextStageReserve[tid].reserve();
+            //nextStageReserve[tid].reserve();
             insts_out.insts[output_index] = inst;
             thread.inFlightInsts->pop();
             // unstall the corresponding fupipeline..
-            if (inst->fuIndex != noCostFUIndex)
+            if (inst->fuIndex != noCostFUIndex){
                 funcUnits[inst->fuIndex]->stalled = false;
+            }
         }
-        else return;
+        else if(funcUnits[inst->fuIndex]->stalled){
+            DPRINTF(CClassCPU,
+                "FU %u is stalled by head inst: %s execSeq=%llu; "
+                "cannot issue inst: %s execSeq=%llu\n",
+                inst->fuIndex,
+                fu_head.inst->isBubble() ? "BUBBLE" : csprintf("%s", *fu_head.inst).c_str(),
+                fu_head.inst->isBubble() ? 0 : fu_head.inst->id.execSeqNum,
+                *inst,
+                inst->id.execSeqNum);
+                return;
+        }
+        else{
+            return;
+        } 
     }
     
     else{
-        nextStageReserve[tid].reserve();
+        //nextStageReserve[tid].reserve();
         insts_out.insts[output_index] = inst;
         thread.inFlightInsts->pop();
         // unstall the corresponding fupipeline..
