@@ -8,6 +8,7 @@
 #ifndef __CPU_CCLASS_EXECUTE_HH__
 #define __CPU_CCLASS_EXECUTE_HH__
 
+#include <map>
 #include <vector>
 
 #include "base/named.hh"
@@ -35,12 +36,13 @@ class Execute : public Named
     Latch<BranchData>::Input out_fetch1;
     Latch<BranchData>::Input out_fetch2;
     Latch<BranchData>::Input out_decode;
-    Latch<ForwardInstData>::Input out_mem;
 
-    std::vector<InputBuffer<ForwardInstData>> &nextStageReserve;
+    Latch<ForwardInstData>::Input out_BASE;
+    Latch<ForwardMemData>::Input out_MEMORY;
+    Latch<ForwardInstData>::Input out_TRAP;
+    Latch<ForwardInstData>::Input out_MBOX;
+    Latch<ForwardInstData>::Input out_FBOX;
 
-
-    /** Pointer back to the containing CPU */
     CClassCPU &cpu;
         
     unsigned int memoryIssueLimit;
@@ -96,6 +98,11 @@ class Execute : public Named
         ExecuteThreadInfo(unsigned int insts_committed) :
             inputIndex(0),
             outputIndex(0),
+            baseOutputIndex(0),
+            memoryOutputIndex(0),
+            trapOutputIndex(0),
+            mboxOutputIndex(0),
+            fboxOutputIndex(0),
             instsBeingCommitted(insts_committed),
             streamSeqNum(InstId::firstStreamSeqNum),
             lastPredictionSeqNum(InstId::firstPredictionSeqNum),
@@ -105,14 +112,19 @@ class Execute : public Named
         ExecuteThreadInfo(const ExecuteThreadInfo& other) :
             inputIndex(other.inputIndex),
             outputIndex(other.outputIndex),
+            baseOutputIndex(other.baseOutputIndex),
+            memoryOutputIndex(other.memoryOutputIndex),
+            trapOutputIndex(other.trapOutputIndex),
+            mboxOutputIndex(other.mboxOutputIndex),
+            fboxOutputIndex(other.fboxOutputIndex),
             instsBeingCommitted(other.instsBeingCommitted),
             streamSeqNum(other.streamSeqNum),
             lastPredictionSeqNum(other.lastPredictionSeqNum),
             drainState(other.drainState)
         { }
 
-           /** In-order instructions either in FUs or the LSQ */
-        Queue<QueuedInst, ReportTraitsAdaptor<QueuedInst> > *inFlightInsts;
+           /** Instructions either in FUs or waiting to be pushed onward */
+        std::vector<QueuedInst> inFlightInsts;
 
         /** Memory ref instructions still in the FUs */
         Queue<QueuedInst, ReportTraitsAdaptor<QueuedInst> > *inFUMemInsts;
@@ -122,6 +134,11 @@ class Execute : public Named
         unsigned int inputIndex;
 
         unsigned int outputIndex;
+        unsigned int baseOutputIndex;
+        unsigned int memoryOutputIndex;
+        unsigned int trapOutputIndex;
+        unsigned int mboxOutputIndex;
+        unsigned int fboxOutputIndex;
 
          /** Structure for reporting insts currently being processed/retired
          *  for MinorTrace */
@@ -168,6 +185,8 @@ class Execute : public Named
      *  if that is a stream-changing branch update the streamSeqNum */
     void updateBranchData(ThreadID tid, BranchData::Reason reason, CClassDynInstPtr inst, const PCStateBase &target, BranchData &branch);
 
+    void handleBranch(ThreadID tid, CClassDynInstPtr inst);
+
 
     //void issuedMemBarrierInst(CClassDynInstPtr inst);
 
@@ -177,7 +196,15 @@ class Execute : public Named
 
     ThreadID getIssuingThread();
 
-    void trytoPush(ThreadID tid,unsigned int output_index);
+    void trytoPush(ThreadID tid);
+
+    void cleanupInFlightInsts(ThreadID tid);
+
+    void resetISBOutputIndexes(ThreadID tid);
+
+    bool pushInstToLatch(ThreadID tid, CClassDynInstPtr inst);
+    bool pushMemReqToLatch(ThreadID tid, ExecRequestPtr request);
+    Fault initiateMemAccess(CClassDynInstPtr inst, ExecRequestPtr &request);
 
 
 
@@ -195,9 +222,9 @@ class Execute : public Named
 
       protected:
         bool recvTimingResp(PacketPtr pkt) override
-        { return 0; }
+        { return execute.recvTimingResp(pkt); }
 
-        void recvReqRetry() override { return; }
+        void recvReqRetry() override { execute.recvReqRetry(); }
 
         bool isSnooping() const override { return true; }
 
@@ -216,15 +243,17 @@ class Execute : public Named
         Latch<BranchData>::Input out_fetch1,
         Latch<BranchData>::Input out_fetch2,
         Latch<BranchData>::Input out_decode,
-        Latch<ForwardInstData>::Input out_mem,
-        std::vector<InputBuffer<ForwardInstData>> &next_stage_input_buffer);
+        Latch<ForwardInstData>::Input out_BASE,
+        Latch<ForwardMemData>::Input out_MEMORY,
+        Latch<ForwardInstData>::Input out_TRAP,
+        Latch<ForwardInstData>::Input out_MBOX,
+        Latch<ForwardInstData>::Input out_FBOX);
 
     ~Execute();
 
     public:
 
-    /** Returns true if the given instruction is at the head of the
-     *  inFlightInsts instruction queue */
+    /** Returns true if the given instruction is still tracked in inFlightInsts. */
     bool instIsHeadInst(CClassDynInstPtr inst);
 
     /** Pass on input/buffer data to the output if you can */
@@ -247,10 +276,27 @@ class Execute : public Named
     } issueStats;
       */
 
+  public:
+    Fault initiateMemRead(CClassDynInstPtr inst, Addr addr, unsigned int size,
+        Request::Flags flags, const std::vector<bool> &byte_enable);
+    Fault writeMem(CClassDynInstPtr inst, uint8_t *data, unsigned int size,
+        Addr addr, Request::Flags flags, uint64_t *res,
+        const std::vector<bool> &byte_enable);
+    Fault initiateMemAMO(CClassDynInstPtr inst, Addr addr, unsigned int size,
+        Request::Flags flags, AtomicOpFunctorPtr amo_op);
+
+    void finishMemTranslation(ExecRequest *request, const Fault &fault);
+    bool sendTimingMemReq(ExecRequest *request);
+    bool recvTimingResp(PacketPtr pkt);
+    void recvReqRetry();
+
+  protected:
+    ExecRequestPtr requestBeingIssued;
+    ExecRequest *retryRequest = nullptr;
+    std::map<std::pair<ThreadID, InstSeqNum>, ExecRequestPtr> pendingMemRequests;
+
 
 };
 }
 }
 #endif
-
-

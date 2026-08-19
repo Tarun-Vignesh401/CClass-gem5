@@ -33,17 +33,26 @@ Pipeline::Pipeline(CClassCPU &cpu_, const BaseCClassCPUParams &params) :
         params.executeBranchDelay),
     eToD(cpu.name() + ".eToD", "branch",
         params.executeBranchDelay),
-    // for now executeBranchDelay
-    eToM(cpu.name() + ".eToM", "branch",
+    eToBASE(cpu.name() + ".eToBASE", "insts",
         params.executeToMemoryForwardDelay),
-    exe_buffer(makeExeBuffer(cpu.name(), params)),
-    //memory(cpu,.name()+ ".execute", cpu, params),
+    eToMEMORY(cpu.name() + ".eToMEMORY", "mem_reqs",
+        params.executeToMemoryForwardDelay),
+    eToTRAP(cpu.name() + ".eToTRAP", "insts",
+        params.executeToMemoryForwardDelay),
+    eToMBOX(cpu.name() + ".eToMBOX", "insts",
+        params.executeToMemoryForwardDelay),
+    eToFBOX(cpu.name() + ".eToFBOX", "insts",
+        params.executeToMemoryForwardDelay),
     execute(cpu.name() + ".execute", cpu, params,
-        dToE.output(),eToF1.input(),eToF2.input(),eToD.input(),eToM.input(),exe_buffer),
-    decode(cpu.name() + ".decode", cpu, params,f2ToD.output(),dToE.input(),execute.inputBuffer),
-    fetch2(cpu.name() + ".fetch2", cpu, params, f1ToF2.output(),
+        dToE.output(), eToF1.input(), eToF2.input(), eToD.input(),
+        eToBASE.input(), eToMEMORY.input(), eToTRAP.input(),
+        eToMBOX.input(), eToFBOX.input()),
+    decode(cpu.name() + ".decode", cpu, params, eToD.output(),
+        f2ToD.output(), dToE.input(), execute.inputBuffer),
+    fetch2(cpu.name() + ".fetch2", cpu, params, eToF2.output(), f1ToF2.output(),
         f2ToD.input(),decode.inputBuffer),
-    fetch1(cpu.name() + ".fetch1", cpu, params, f1ToF2.input(), fetch2.inputBuffer)
+    fetch1(cpu.name() + ".fetch1", cpu, params, eToF1.output(),
+        f1ToF2.input(), fetch2.inputBuffer)
     /*activityRecorder(cpu.name() + ".activity", Num_StageId,
       *   The max depth of inter-stage FIFOs 
       *   std::max(params.fetch1ToFetch2ForwardDelay,
@@ -117,7 +126,15 @@ Pipeline::evaluate()
     f1ToF2.evaluate();
     f2ToD.evaluate();
     dToE.evaluate();
-    eToM.evaluate();
+    eToF1.evaluate();
+    eToF2.evaluate();
+    eToD.evaluate();
+    eToBASE.evaluate();
+    eToMEMORY.evaluate();
+    eToTRAP.evaluate();
+    eToMBOX.evaluate();
+    eToFBOX.evaluate();
+
     //fetch2.finaldebugprint();
 
     //std::cout << "you've entered evaluate of fetch2!"<<std::endl;
@@ -239,21 +256,5 @@ Pipeline::isDrained()
 
     return ret;
 }*/
-// temporarily for making the exec buffer..
-std::vector<InputBuffer<ForwardInstData>>
-Pipeline::makeExeBuffer(const std::string &name, const BaseCClassCPUParams &params)
-{
-    std::vector<InputBuffer<ForwardInstData>> ret;
-
-    for (ThreadID tid = 0; tid < params.numThreads; tid++) {
-        ret.emplace_back(
-            name + ".exeBuffer" + std::to_string(tid),
-            "insts",
-            params.executeInputBufferSize);
-    }
-
-    return ret;
-}
-
-} // namespace minor
+} // namespace cclass
 } // namespace gem5

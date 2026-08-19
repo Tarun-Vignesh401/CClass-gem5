@@ -59,6 +59,7 @@ class ExecContext : public gem5::ExecContext
         execute(execute_),
         inst(inst_)
     {
+        // the pc state is set to pc of committing instruction , always!!
         pcState(*inst->pc);
         setPredicate(inst->readPredicate());
         setMemAccPredicate(inst->readMemAccPredicate());
@@ -81,11 +82,7 @@ class ExecContext : public gem5::ExecContext
         RiscvControlResolution &resolution) const;
 
     Fault initiateMemRead(Addr addr, unsigned int size, Request::Flags flags,
-        const std::vector<bool> &byte_enable) override
-    {
-        panic("CClass ExecContext::initiateMemRead is not wired to an LSQ yet\n");
-        return NoFault;
-    }
+        const std::vector<bool> &byte_enable) override;
 
     Fault initiateMemMgmtCmd(Request::Flags flags) override
     {
@@ -95,18 +92,10 @@ class ExecContext : public gem5::ExecContext
 
     Fault writeMem(uint8_t *data, unsigned int size, Addr addr,
         Request::Flags flags, uint64_t *res,
-        const std::vector<bool> &byte_enable) override
-    {
-        panic("CClass ExecContext::writeMem is not wired to an LSQ yet\n");
-        return NoFault;
-    }
+        const std::vector<bool> &byte_enable) override;
 
     Fault initiateMemAMO(Addr addr, unsigned int size, Request::Flags flags,
-        AtomicOpFunctorPtr amo_op) override
-    {
-        panic("CClass ExecContext::initiateMemAMO is not wired to an LSQ yet\n");
-        return NoFault;
-    }
+        AtomicOpFunctorPtr amo_op) override;
 
     RegVal getRegOperand(const StaticInst *si, int idx) override
     {
@@ -164,7 +153,7 @@ class ExecContext : public gem5::ExecContext
         panic("CClass ExecContext::getHtmTransactionalDepth is not implemented\n");
         return 0;
     }
-
+    // always set pc state to the committing instruction pc...
     const PCStateBase &pcState() const override { return thread.pcState(); }
     void pcState(const PCStateBase &val) override { thread.pcState(val); }
 

@@ -46,10 +46,11 @@ class Pipeline : public Ticked
     Latch<BranchData> eToF1;
     Latch<BranchData> eToF2;
     Latch<BranchData> eToD;
-    Latch<ForwardInstData> eToM;
-
-
-    std::vector<InputBuffer<ForwardInstData>> exe_buffer;
+    Latch<ForwardInstData> eToBASE;
+    Latch<ForwardMemData> eToMEMORY;
+    Latch<ForwardInstData> eToTRAP;
+    Latch<ForwardInstData> eToMBOX;
+    Latch<ForwardInstData> eToFBOX;
 
     Execute execute;
     Decode decode;
@@ -81,8 +82,6 @@ class Pipeline : public Ticked
     /** Wake up the Fetch unit.  This is needed on thread activation esp.
      *  after quiesce wakeup */
     void wakeupFetch(ThreadID tid);
-
-    static std::vector<InputBuffer<ForwardInstData>> makeExeBuffer(const std::string &name, const BaseCClassCPUParams &params);
 
     /** Try to drain the CPU */
     //bool drain();

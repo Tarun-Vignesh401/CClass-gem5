@@ -50,17 +50,28 @@
 #ifndef __CPU_CCLASS_PIPE_DATA_HH__
 #define __CPU_CCLASS_PIPE_DATA_HH__
 
+#include <memory>
+#include <vector>
+
 #include "cpu/cclass/buffers.hh"
 #include "cpu/cclass/dyn_inst.hh"
 #include "cpu/base.hh"
 
 #include "cpu/cclass/dyn_inst.hh"
+#include "arch/generic/mmu.hh"
+#include "mem/packet.hh"
+#include "mem/request.hh"
 
 namespace gem5
 {
 
 namespace cclass
 {
+
+class Execute;
+
+class ExecRequest;
+using ExecRequestPtr = std::shared_ptr<ExecRequest>;
     
    //this enum is primarily for multithreading support.
   enum Fetch1State {
@@ -205,7 +216,7 @@ class ForwardLineData{
 };
 
 /** Maximum number of instructions that can be carried by the pipeline. */
-const unsigned int MAX_FORWARD_INSTS = 16;
+const unsigned int MAX_FORWARD_INSTS = 4;
 
 
 
@@ -245,6 +256,67 @@ class ForwardInstData /* : public ReportIF, public BubbleIF */
 
     /** ReportIF interface */
     //void reportData(std::ostream &os) const;
+};
+
+class ExecRequest : public Packet::SenderState, public BaseMMU::Translation
+{
+  public:
+    enum State
+    {
+        NotIssued,
+        InTranslation,
+        Translated,
+        SentToCache,
+        WaitingRetry,
+        Complete,
+        Failed
+    };
+
+    Execute &execute;
+    CClassDynInstPtr inst;
+    RequestPtr request;
+    PacketPtr packet = nullptr;
+    bool isLoad = false;
+    bool isStore = false;
+    State state = NotIssued;
+    Fault fault = NoFault;
+    std::vector<uint8_t> data;
+    uint64_t *res = nullptr;
+
+    ExecRequest(Execute &execute_, CClassDynInstPtr inst_, bool is_load,
+        uint8_t *store_data, unsigned int size, uint64_t *res_);
+
+    bool sent() const { return state == SentToCache; }
+    bool complete() const { return state == Complete; }
+    bool waitingRetry() const { return state == WaitingRetry; }
+    bool failed() const { return state == Failed || fault != NoFault; }
+
+    void markInTranslation() { state = InTranslation; }
+    void markTranslated() { state = Translated; }
+    void markSent() { state = SentToCache; }
+    void markRetry() { state = WaitingRetry; }
+    void markFault(Fault fault_);
+    void markComplete(PacketPtr response);
+    PacketPtr makePacket();
+
+    void markDelayed() override {}
+    void finish(const Fault &fault_, const RequestPtr &req,
+        ThreadContext *tc, BaseMMU::Mode mode) override;
+};
+
+class ForwardMemData
+{
+  public:
+    ExecRequestPtr request;
+    ThreadID threadId = InvalidThreadID;
+
+    ForwardMemData() = default;
+    ForwardMemData(ExecRequestPtr request_, ThreadID tid) :
+        request(request_), threadId(tid)
+    { }
+
+    static ForwardMemData bubble() { return ForwardMemData(); }
+    bool isBubble() const { return !request; }
 };
 
 

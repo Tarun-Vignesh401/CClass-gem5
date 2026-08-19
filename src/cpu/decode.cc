@@ -16,11 +16,13 @@ namespace cclass
 Decode::Decode(const std::string &name,
     CClassCPU &cpu_,
     const BaseCClassCPUParams &params,
+    Latch<BranchData>::Output branch_,
     Latch<ForwardLineData>::Output inp_,
     Latch<ForwardInstData>::Input out_,
     std::vector<InputBuffer<ForwardInstData>> &next_stage_input_buffer) :
     Named(name),
     cpu(cpu_),
+    branch(branch_),
     out(out_),
     inp(inp_),
     nextStageReserve(next_stage_input_buffer),
@@ -71,6 +73,9 @@ Decode::popInput(ThreadID tid)
 
 void 
 Decode::evaluate(){
+    if (checkRedirect())
+        return;
+
     
 if (!inp.outputWire->isBubble())
         inputBuffer[inp.outputWire->id.threadId].setTail(*inp.outputWire);
@@ -371,6 +376,25 @@ if (!inp.outputWire->isBubble())
     if (!inp.outputWire->isBubble())
         inputBuffer[inp.outputWire->id.threadId].pushTail();
 }
+
+bool
+Decode::checkRedirect()
+{
+    const BranchData &branch_data = *branch.outputWire;
+
+    if (branch_data.isBubble())
+        return false;
+
+    DPRINTF(CClassCPU, "Decode saw branch data: %s\n", branch_data);
+
+    for (ThreadID tid = 0; tid < cpu.numThreads; tid++) {
+        while (!inputBuffer[tid].empty())
+            popInput(tid);
+    }
+
+    return true;
+}
+
 void
 Decode::dumpAllInput(ThreadID tid)
 {

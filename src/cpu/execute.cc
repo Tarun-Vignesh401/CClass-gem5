@@ -1,4 +1,5 @@
 #include "cpu/cclass/execute.hh"
+#include <algorithm>
 #include <functional>
 
 
@@ -24,6 +25,7 @@
 #include "cpu/cclass/exec_context.hh"
 #include "cpu/cclass/fetch1.hh"
 #include "cpu/op_class.hh"
+#include "base/cast.hh"
 #include "debug/Activity.hh"
 #include "debug/Branch.hh"
 #include "debug/Drain.hh"
@@ -45,15 +47,21 @@ Execute::Execute(const std::string &name_, CClassCPU &cpu_,
                  Latch<BranchData>::Input out_fetch1,
                  Latch<BranchData>::Input out_fetch2,
                  Latch<BranchData>::Input out_decode,
-                 Latch<ForwardInstData>::Input out_mem, 
-                 std::vector<InputBuffer<ForwardInstData>> &next_stage_input_buffer):
+                 Latch<ForwardInstData>::Input out_BASE,
+                 Latch<ForwardMemData>::Input out_MEMORY,
+                 Latch<ForwardInstData>::Input out_TRAP,
+                 Latch<ForwardInstData>::Input out_MBOX,
+                 Latch<ForwardInstData>::Input out_FBOX):
       Named(name_),
       inp(inp_),
       out_fetch1(out_fetch1),
       out_fetch2(out_fetch2),
       out_decode(out_decode),
-      out_mem(out_mem),
-      nextStageReserve(next_stage_input_buffer),
+      out_BASE(out_BASE),
+      out_MEMORY(out_MEMORY),
+      out_TRAP(out_TRAP),
+      out_MBOX(out_MBOX),
+      out_FBOX(out_FBOX),
       cpu(cpu_),
       issueLimit(params.executeIssueLimit),
       memoryIssueLimit(params.executeMemoryIssueLimit),
@@ -136,9 +144,7 @@ for (ThreadID tid = 0; tid < params.numThreads; tid++) {
         scoreboard.emplace_back(name_ + ".scoreboard" + tid_str, regClasses);
 
         /* In-flight instruction records */
-        executeInfo[tid].inFlightInsts =  new Queue<QueuedInst,
-            ReportTraitsAdaptor<QueuedInst> >(
-            name_ + ".inFlightInsts" + tid_str, "insts", total_slots);
+        executeInfo[tid].inFlightInsts.reserve(total_slots);
 
         executeInfo[tid].inFUMemInsts = new Queue<QueuedInst,
             ReportTraitsAdaptor<QueuedInst> >(
@@ -166,12 +172,10 @@ void Execute::evaluate(){
     BranchData &branch_fetch2 = *out_fetch2.inputWire;
     BranchData &branch_decode = *out_decode.inputWire;
 
-   // ForwardInstData &insts_out = *out_mem.inputWire;
-
     //std::vector<ForwardingSource> mem_exe_forwards;
     //std::vector<ForwardingSource> mem_wb_forwards;
 
-    static unsigned int output_index = 0;
+    //static unsigned int output_index = 0;
 
     unsigned int num_issued = 0;
     
@@ -183,6 +187,7 @@ void Execute::evaluate(){
 
     ThreadID issue_tid = getIssuingThread();
     ExecuteThreadInfo& thread = executeInfo[issue_tid];
+    resetISBOutputIndexes(issue_tid);
 
     for(unsigned int i=0; i < numFuncUnits; i++){
     FUPipeline *fu = funcUnits[i];
@@ -245,7 +250,7 @@ void Execute::evaluate(){
             }
         }*/
 
-    trytoPush(issue_tid,thread.outputIndex);
+    trytoPush(issue_tid);
     // for resolving mem requests to dcache...
    // for(i = 0; i<sizeof(inFUMemInsts); i++){
      //   inst = inFUMemInsts[i].inst;
@@ -386,10 +391,9 @@ Execute::issue(ThreadID thread_id)
                     inst->extraCommitDelay = Cycles(0);
                     inst->extraCommitDelayExpr = NULL;
 
-                    /* Push the instruction onto the nextStage queue so
-                     *  it can be committed in order */
+                    /* Track this instruction until it is ready to push onward. */
                     QueuedInst fu_inst(inst);
-                    thread.inFlightInsts->push(fu_inst);
+                    thread.inFlightInsts.push_back(fu_inst);
 
                     issued = true;
 
@@ -532,9 +536,8 @@ Execute::issue(ThreadID thread_id)
                             cpu.getContext(thread_id),
                             issued_mem_ref && extra_assumed_lat == Cycles(0));
 
-                        /* Push the instruction onto the nextStage queue so
-                         *  it can be committed in order */
-                        thread.inFlightInsts->push(fu_inst);
+                        /* Track this instruction until it is ready to push onward. */
+                        thread.inFlightInsts.push_back(fu_inst);
 
                         issued = true;
                     }
@@ -607,66 +610,218 @@ Execute::issue(ThreadID thread_id)
 
 
 void
-Execute::trytoPush(ThreadID tid, unsigned int output_index){
+Execute::trytoPush(ThreadID tid){
     ExecuteThreadInfo &thread = executeInfo[tid];
-    ForwardInstData &insts_out = *out_mem.inputWire;
 
-    if (thread.inFlightInsts->empty())
+    if (thread.inFlightInsts.empty())
         return;
 
-    QueuedInst &head = thread.inFlightInsts->front();
-    CClassDynInstPtr inst = head.inst;
+    for (auto it = thread.inFlightInsts.begin();
+        it != thread.inFlightInsts.end(); )
+    {
+        CClassDynInstPtr inst = it->inst;
 
-    if (inst->isBubble())
-        return;
-    //temporarilu
-    //if (!nextStageReserve[tid].canReserve())
-        //return;
+        if (inst->isBubble()) {
+            it = thread.inFlightInsts.erase(it);
+            continue;
+        }
 
-    bool inst_ready = false; 
-    bool isbubble = inst->isNoCostInst();
+        if (inst->isFault() || inst->isNoCostInst()) {
+            if (pushInstToLatch(tid, inst)) {
+                it = thread.inFlightInsts.erase(it);
+                continue;
+            }
 
-    if (!isbubble) {
+            ++it;
+            continue;
+        }
+
+        if (inst->fuIndex >= numFuncUnits) {
+            DPRINTF(CClassCPU,
+                "Skipping unallocated in-flight inst: %s fuIndex=%u\n",
+                *inst, inst->fuIndex);
+            it->inst = CClassDynInst::bubble();
+            ++it;
+            continue;
+        }
+
         FUPipeline *fu = funcUnits[inst->fuIndex];
         QueuedInst &fu_head = fu->front();
-
-        inst_ready = !fu_head.inst->isBubble() &&
+        bool inst_ready = !fu_head.inst->isBubble() &&
             fu_head.inst->id.execSeqNum == inst->id.execSeqNum &&
             fu_head.inst->id == inst->id;
-        
-        if(inst_ready){
-            //nextStageReserve[tid].reserve();
-            insts_out.insts[output_index] = inst;
-            thread.inFlightInsts->pop();
-            // unstall the corresponding fupipeline..
-            if (inst->fuIndex != noCostFUIndex){
-                funcUnits[inst->fuIndex]->stalled = false;
-            }
-        }
-        else if(funcUnits[inst->fuIndex]->stalled){
+
+        if (inst_ready) {
+            if (inst->isInst() && inst->staticInst->isControl())
+                handleBranch(tid, inst);
+            // control instruction handling...
+            if (inst->isMemRef()) {
+                if (!out_MEMORY.inputWire->isBubble()) {
+                    ++it;
+                    continue;
+                }
+
+                auto request_key = std::make_pair(tid, inst->id.execSeqNum);
+                ExecRequestPtr mem_request;
+                auto request_it = pendingMemRequests.find(request_key);
+
+                if (request_it != pendingMemRequests.end()) {
+                    mem_request = request_it->second;
+                } else {
+                    Fault fault = initiateMemAccess(inst, mem_request);
+                    if (fault != NoFault) {
+                        inst->fault = fault;
+                        DPRINTF(CClassCPU, "Memory issue fault: %s inst: %s\n",
+                            fault->name(), *inst);
+                    }
+
+                    if (mem_request)
+                        pendingMemRequests[request_key] = mem_request;
+                }
+
+                if (inst->fault != NoFault) {
+                    pendingMemRequests.erase(request_key);
+                    if (pushInstToLatch(tid, inst)) {
+                        fu->stalled = false;
+                        it = thread.inFlightInsts.erase(it);
+                        continue;
+                    }
+                } else if (mem_request && mem_request->failed()) {
+                    inst->fault = mem_request->fault;
+                    pendingMemRequests.erase(request_key);
+                    if (pushInstToLatch(tid, inst)) {
+                        fu->stalled = false;
+                        it = thread.inFlightInsts.erase(it);
+                        continue;
+                    }
+                } else if (mem_request &&
+                    (mem_request->sent() || mem_request->complete()))
+                {
+                    if (pushMemReqToLatch(tid, mem_request)) {
+                        pendingMemRequests.erase(request_key);
+                        fu->stalled = false;
+                        it = thread.inFlightInsts.erase(it);
+                        continue;
+                    }
+                } else if (mem_request) {
+                    DPRINTF(CClassCPU,
+                        "Memory request not ready for memory ISB yet: "
+                        "inst=%s state=%d\n",
+                        *inst, mem_request->state);
+                }
+            }// mem inst handling..
+            else if (pushInstToLatch(tid, inst)) {
+                fu->stalled = false;
+                it = thread.inFlightInsts.erase(it);
+                continue;
+            }// any other instruction handling...
+        } else if (fu->stalled) {
             DPRINTF(CClassCPU,
                 "FU %u is stalled by head inst: %s execSeq=%llu; "
-                "cannot issue inst: %s execSeq=%llu\n",
+                "in-flight inst not ready yet: %s execSeq=%llu\n",
                 inst->fuIndex,
-                fu_head.inst->isBubble() ? "BUBBLE" : csprintf("%s", *fu_head.inst).c_str(),
+                fu_head.inst->isBubble() ? "BUBBLE" :
+                    csprintf("%s", *fu_head.inst).c_str(),
                 fu_head.inst->isBubble() ? 0 : fu_head.inst->id.execSeqNum,
                 *inst,
                 inst->id.execSeqNum);
-                return;
         }
-        else{
-            return;
-        } 
+
+        ++it;
     }
-    
-    else{
-        //nextStageReserve[tid].reserve();
-        insts_out.insts[output_index] = inst;
-        thread.inFlightInsts->pop();
-        // unstall the corresponding fupipeline..
-        if (inst->fuIndex != noCostFUIndex)
-            funcUnits[inst->fuIndex]->stalled = false;  
+
+    cleanupInFlightInsts(tid);
+}
+
+void
+Execute::cleanupInFlightInsts(ThreadID tid)
+{
+    ExecuteThreadInfo &thread = executeInfo[tid];
+
+    thread.inFlightInsts.erase(
+        std::remove_if(thread.inFlightInsts.begin(), thread.inFlightInsts.end(),
+            [this](const QueuedInst &entry) {
+                CClassDynInstPtr inst = entry.inst;
+
+                if (inst->isBubble())
+                    return true;
+
+                return !inst->isFault() &&
+                    !inst->isNoCostInst() &&
+                    inst->fuIndex >= numFuncUnits;
+            }),
+        thread.inFlightInsts.end());
+}
+
+void
+Execute::resetISBOutputIndexes(ThreadID tid)
+{
+    ExecuteThreadInfo &thread = executeInfo[tid];
+
+    thread.baseOutputIndex = 0;
+    thread.memoryOutputIndex = 0;
+    thread.trapOutputIndex = 0;
+    thread.mboxOutputIndex = 0;
+    thread.fboxOutputIndex = 0;
+}
+
+bool
+Execute::pushInstToLatch(ThreadID tid, CClassDynInstPtr inst)
+{
+    ExecuteThreadInfo &thread = executeInfo[tid];
+    Latch<ForwardInstData>::Input *out = &out_BASE;
+    unsigned int *output_index = &thread.baseOutputIndex;
+
+    if (inst->isFault()) {
+        out = &out_TRAP;
+        output_index = &thread.trapOutputIndex;
+    } else if (inst->isInst()) {
+        OpClass op_class = inst->staticInst->opClass();
+
+        if (op_class == enums::IntMult || op_class == enums::IntDiv) {
+            out = &out_MBOX;
+            output_index = &thread.mboxOutputIndex;
+        } else if (inst->staticInst->isFloating() ||
+                   inst->staticInst->isVector()) {
+            out = &out_FBOX;
+            output_index = &thread.fboxOutputIndex;
+        }
     }
+
+    ForwardInstData &insts_out = *out->inputWire;
+    unsigned int width = thread.instsBeingCommitted.width();
+
+    if (insts_out.isBubble()) {
+        insts_out = ForwardInstData(width, tid);
+        insts_out.threadId = tid;
+    }
+
+    if (*output_index < insts_out.width()) {
+        insts_out.insts[*output_index] = inst;
+        DPRINTF(CClassCPU, "Pushed inst %s to ISB slot %u\n",
+            *inst, *output_index);
+        (*output_index)++;
+        return true;
+    }
+
+    return false;
+}
+
+bool
+Execute::pushMemReqToLatch(ThreadID tid, ExecRequestPtr request)
+{
+    ExecuteThreadInfo &thread = executeInfo[tid];
+    ForwardMemData &mem_out = *out_MEMORY.inputWire;
+
+    if (!mem_out.isBubble())
+        return false;
+
+    mem_out = ForwardMemData(request, tid);
+    thread.memoryOutputIndex++;
+
+    DPRINTF(CClassCPU, "Pushed memory request for inst %s to memory latch\n",
+        *request->inst);
+    return true;
 }
 
 /*
@@ -776,8 +931,12 @@ Execute::instIsHeadInst(CClassDynInstPtr inst)
 {
     bool ret = false;
 
-    if (!executeInfo[inst->id.threadId].inFlightInsts->empty())
-        ret = executeInfo[inst->id.threadId].inFlightInsts->front().inst->id == inst->id;
+    for (const auto &entry : executeInfo[inst->id.threadId].inFlightInsts) {
+        if (!entry.inst->isBubble() && entry.inst->id == inst->id) {
+            ret = true;
+            break;
+        }
+    }
 
     return ret;
 }
@@ -788,7 +947,7 @@ Execute::isDrained()
 
     for (ThreadID tid = 0; tid < cpu.numThreads; tid++) {
         if (!inputBuffer[tid].empty() ||
-            !executeInfo[tid].inFlightInsts->empty()) {
+            !executeInfo[tid].inFlightInsts.empty()) {
 
             return false;
         }
@@ -814,6 +973,39 @@ Execute::getIssuingThread()
 
 
 void
+Execute::handleBranch(ThreadID tid, CClassDynInstPtr inst)
+{
+    ThreadContext *thread = cpu.getContext(tid);
+    std::unique_ptr<PCStateBase> sequential_pc(inst->pc->clone());
+    sequential_pc->advance();
+
+    ExecContext context(cpu, *cpu.threads[tid], *this, inst);
+    Fault fault = inst->staticInst->execute(&context, inst->traceData);
+
+    if (fault != NoFault) {
+        inst->fault = fault;
+        DPRINTF(CClassCPU, "Branch execution fault: %s inst: %s\n",
+            fault->name(), *inst);
+        return;
+    }
+
+    const PCStateBase &target = thread->pcState();
+    bool taken = target.instAddr() != sequential_pc->instAddr();
+    BranchData::Reason reason = taken ?
+        BranchData::UnpredictedBranch :
+        BranchData::CorrectlyPredictedBranch;
+
+    BranchData &branch_fetch1 = *out_fetch1.inputWire;
+
+    updateBranchData(tid, reason, inst, target, branch_fetch1);
+    *out_fetch2.inputWire = branch_fetch1;
+    *out_decode.inputWire = branch_fetch1;
+
+    DPRINTF(CClassCPU, "Handled branch inst: %s taken=%d target=%s\n",
+        *inst, taken, target);
+}
+
+void
 Execute::updateBranchData(
     ThreadID tid,
     BranchData::Reason reason,
@@ -835,8 +1027,178 @@ Execute::updateBranchData(
                 : inst->id.predictionSeqNum),
             target, inst);
 
-        DPRINTF(Branch, "Branch data signalled: %s\n", branch);
+        DPRINTF(CClassCPU, "Branch data signalled: %s\n", branch);
     }
+}
+
+Fault
+Execute::initiateMemAccess(CClassDynInstPtr inst, ExecRequestPtr &request)
+{
+    assert(inst);
+    assert(inst->isMemRef());
+
+    requestBeingIssued.reset();
+
+    ExecContext context(cpu, *cpu.threads[inst->id.threadId], *this, inst);
+    Fault fault = inst->staticInst->initiateAcc(&context, inst->traceData);
+
+    request = requestBeingIssued;
+    requestBeingIssued.reset();
+
+    if (fault != NoFault)
+        return fault;
+
+    if (request)
+        return request->fault;
+
+    return NoFault;
+}
+
+Fault
+Execute::initiateMemRead(CClassDynInstPtr inst, Addr addr, unsigned int size,
+    Request::Flags flags, const std::vector<bool> &byte_enable)
+{
+    auto request = std::make_shared<ExecRequest>(
+        *this, inst, true, nullptr, size, nullptr);
+
+    if (inst->traceData)
+        inst->traceData->setMem(addr, size, flags);
+
+    ThreadContext *tc = cpu.getContext(inst->id.threadId);
+    request->request->setContext(tc->contextId());
+    request->request->setVirt(addr, size, flags, cpu.dataRequestorId(),
+        inst->pc->instAddr());
+    request->request->setByteEnable(byte_enable);
+
+    requestBeingIssued = request;
+    request->markInTranslation();
+
+    DPRINTF(CClassCPU,
+        "DTLB translation request: inst=%s type=load vaddr=%#x size=%u\n",
+        *inst, addr, size);
+
+    cpu.threads[inst->id.threadId]->mmu->translateTiming(
+        request->request, tc, request.get(), BaseMMU::Read);
+
+    return request->fault;
+}
+
+Fault
+Execute::writeMem(CClassDynInstPtr inst, uint8_t *data, unsigned int size,
+    Addr addr, Request::Flags flags, uint64_t *res,
+    const std::vector<bool> &byte_enable)
+{
+    auto request = std::make_shared<ExecRequest>(
+        *this, inst, false, data, size, res);
+
+    if (inst->traceData)
+        inst->traceData->setMem(addr, size, flags);
+
+    ThreadContext *tc = cpu.getContext(inst->id.threadId);
+    request->request->setContext(tc->contextId());
+    request->request->setVirt(addr, size, flags, cpu.dataRequestorId(),
+        inst->pc->instAddr());
+    request->request->setByteEnable(byte_enable);
+
+    requestBeingIssued = request;
+    request->markInTranslation();
+
+    DPRINTF(CClassCPU,
+        "DTLB translation request: inst=%s type=store vaddr=%#x size=%u\n",
+        *inst, addr, size);
+
+    cpu.threads[inst->id.threadId]->mmu->translateTiming(
+        request->request, tc, request.get(), BaseMMU::Write);
+
+    return request->fault;
+}
+
+Fault
+Execute::initiateMemAMO(CClassDynInstPtr inst, Addr addr, unsigned int size,
+    Request::Flags flags, AtomicOpFunctorPtr amo_op)
+{
+    panic("CClass Execute AMO memory requests are not implemented yet\n");
+    return NoFault;
+}
+
+void
+ExecRequest::finish(const Fault &fault_, const RequestPtr &req,
+    ThreadContext *tc, BaseMMU::Mode mode)
+{
+    execute.finishMemTranslation(this, fault_);
+}
+
+void
+Execute::finishMemTranslation(ExecRequest *request, const Fault &fault)
+{
+    if (fault != NoFault) {
+        request->markFault(fault);
+        DPRINTF(CClassCPU, "DTLB translation fault: inst=%s type=%s fault=%s\n",
+            *request->inst, request->isLoad ? "load" : "store",
+            fault->name());
+    } else {
+        request->markTranslated();
+        DPRINTF(CClassCPU, "DTLB translation complete: inst=%s type=%s\n",
+            *request->inst, request->isLoad ? "load" : "store");
+        sendTimingMemReq(request);
+    }
+
+    cpu.wakeupOnEvent(Pipeline::ExecuteStageId);
+}
+
+bool
+Execute::sendTimingMemReq(ExecRequest *request)
+{
+    assert(request);
+
+    if (!request->packet)
+        request->makePacket();
+
+    DPRINTF(CClassCPU, "Dcache request: inst=%s type=%s\n",
+        *request->inst, request->isLoad ? "load" : "store");
+
+    if (dcachePort.sendTimingReq(request->packet)) {
+        DPRINTF(CClassCPU, "Dcache request accepted: inst=%s type=%s\n",
+            *request->inst, request->isLoad ? "load" : "store");
+        request->packet = nullptr;
+        request->markSent();
+        return true;
+    }
+
+    retryRequest = request;
+    request->markRetry();
+    DPRINTF(CClassCPU, "Dcache request blocked: inst=%s type=%s\n",
+        *request->inst, request->isLoad ? "load" : "store");
+    return false;
+}
+
+bool
+Execute::recvTimingResp(PacketPtr pkt)
+{
+    ExecRequest *request = safe_cast<ExecRequest *>(pkt->popSenderState());
+
+    DPRINTF(CClassCPU, "Dcache response: inst=%s type=%s\n",
+        *request->inst, request->isLoad ? "load" : "store");
+
+    request->markComplete(pkt);
+
+    cpu.wakeupOnEvent(Pipeline::ExecuteStageId);
+    return true;
+}
+
+void
+Execute::recvReqRetry()
+{
+    if (!retryRequest)
+        return;
+
+    ExecRequest *request = retryRequest;
+    retryRequest = nullptr;
+
+    if (!sendTimingMemReq(request))
+        return;
+
+    cpu.wakeupOnEvent(Pipeline::ExecuteStageId);
 }
 
 Execute::~Execute()
@@ -844,8 +1206,6 @@ Execute::~Execute()
     for (unsigned int i = 0; i < numFuncUnits; i++)
         delete funcUnits[i];
 
-    for (ThreadID tid = 0; tid < cpu.numThreads; tid++)
-        delete executeInfo[tid].inFlightInsts;
 }
 
 

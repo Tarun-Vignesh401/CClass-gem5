@@ -28,11 +28,13 @@ namespace gem5
         Fetch1::Fetch1(const std::string &name_, 
             CClassCPU &cpu_,
             const BaseCClassCPUParams &params,
+            Latch<BranchData>::Output inp_,
             Latch<Fetch1ThreadInfo>::Input out_,
             std::vector<InputBuffer<Fetch1ThreadInfo>> &next_stage_input_buffer) :
             Named(name_),
             cpu(cpu_),
             nextStageReserve(next_stage_input_buffer),
+            inp(inp_),
             out(out_),
             fetchInfo(params.numThreads),
             threadPriority(0),
@@ -48,8 +50,52 @@ namespace gem5
         fatal("%s: fetch1FetchLimit must be >= 1 (%d)\n", name_,
             fetchLimit);
         }
-        
+
     }
+    bool
+    Fetch1::checkRedirect(Fetch1ThreadInfo &out_thread)
+    {
+        const BranchData &branch = *inp.outputWire;
+
+        if (branch.isBubble()){
+            std::cout<< "latch is bubble !\n";
+            return false;
+        }
+        DPRINTF(CClassCPU, "Fetch1 saw branch data: %s\n", branch);
+
+        if (!branch.isStreamChange())
+            return false;
+
+        ThreadID tid = branch.threadId;
+        Fetch1ThreadInfo &thread = fetchInfo[tid];
+
+        // Not handled by advancepc() explicitly setting here
+        thread.streamSeqNum = branch.newStreamSeqNum;
+        thread.predictionSeqNum = branch.newPredictionSeqNum;
+
+        cpu.getContext(tid)->pcState(*branch.target);
+        /* 
+        * get npc to current pc (branch pc-->target pc) 
+        * advancepc() takes care of setting other parts of
+        * Fetch1ThreadInfo, including the pc state from thread
+        * context.
+        */
+        advancepc(tid);
+       
+        /*check if the target pc is different from current
+        * pc of fetch1?
+        */
+        bool pc_changed = !thread.pc ||
+            thread.pc->instAddr() != branch.target->instAddr();
+
+        if (pc_changed && nextStageReserve[tid].canReserve()) {
+            nextStageReserve[tid].reserve();
+            processResponse(out_thread, thread);
+        }
+
+        return pc_changed;
+    }
+
     ThreadID Fetch1::getScheduledThread(){
 
         //for now only one thread can be extended for multithreading support later
@@ -137,6 +183,9 @@ void Fetch1::evaluate(){
         //const BranchData &branchPred = ;
 
         Fetch1ThreadInfo &out_thread = *out.inputWire;
+        if (checkRedirect(out_thread))
+            return;
+
       //for (ThreadID tid = 0; tid < cpu.numThreads; tid++)
       //for now single threaded support
     //advance architectural PC here 

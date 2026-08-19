@@ -2,11 +2,79 @@
 
 #include "cpu/cclass/pipe_data.hh"
 
+#include <cstring>
+
 namespace gem5
 {
 
 namespace cclass
 {
+
+ExecRequest::ExecRequest(Execute &execute_, CClassDynInstPtr inst_,
+    bool is_load, uint8_t *store_data, unsigned int size, uint64_t *res_) :
+    execute(execute_),
+    inst(inst_),
+    request(std::make_shared<Request>()),
+    isLoad(is_load),
+    isStore(!is_load),
+    res(res_)
+{
+    assert(inst);
+    assert(isLoad || isStore);
+
+    if (isStore && size != 0) {
+        data.resize(size);
+        if (store_data) {
+            std::memcpy(data.data(), store_data, size);
+        } else {
+            std::memset(data.data(), 0, size);
+        }
+    }
+}
+
+void
+ExecRequest::markFault(Fault fault_)
+{
+    fault = fault_;
+    state = Failed;
+}
+
+PacketPtr
+ExecRequest::makePacket()
+{
+    assert(request);
+    assert(!packet);
+
+    packet = isLoad ? Packet::createRead(request)
+                    : Packet::createWrite(request);
+    packet->pushSenderState(this);
+
+    if (isLoad) {
+        packet->allocate();
+    } else if (!request->isCacheMaintenance() && !data.empty()) {
+        packet->dataStatic(data.data());
+    }
+
+    return packet;
+}
+
+void
+ExecRequest::markComplete(PacketPtr response)
+{
+    packet = response;
+
+    if (response->isError()) {
+        state = Failed;
+        return;
+    }
+
+    if (isLoad) {
+        data.resize(response->getSize());
+        response->writeData(data.data());
+    }
+
+    state = Complete;
+}
 void
 ForwardLineData::setFault(Fault fault_)
 {

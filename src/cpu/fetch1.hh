@@ -29,6 +29,7 @@ namespace gem5
             CClassCPU &cpu;
             // have to make the class template for this
             std::vector<InputBuffer<Fetch1ThreadInfo>> &nextStageReserve;
+            Latch<BranchData>::Output inp;
             Latch<Fetch1ThreadInfo>::Input out;
             //idk maybe this should come in fetch2?
            // Addr lineSnap;
@@ -36,10 +37,13 @@ namespace gem5
             unsigned int fetchLimit;
 
             void processResponse(Fetch1ThreadInfo &out, Fetch1ThreadInfo &thread);
+
+            bool checkRedirect(Fetch1ThreadInfo &out_thread);
            
             public:
             Fetch1(const std::string &name_,CClassCPU &cpu_,const BaseCClassCPUParams &params,
-                Latch<Fetch1ThreadInfo>::Input out_,std::vector<InputBuffer<Fetch1ThreadInfo>> &nextStageReserve_);
+                Latch<BranchData>::Output inp_, Latch<Fetch1ThreadInfo>::Input out_,
+                std::vector<InputBuffer<Fetch1ThreadInfo>> &nextStageReserve_);
             void evaluate();
 
             void wakeupFetch(ThreadID tid);

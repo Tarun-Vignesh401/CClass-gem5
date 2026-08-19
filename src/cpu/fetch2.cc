@@ -18,11 +18,13 @@ namespace cclass {
 
 Fetch2::Fetch2(const std::string &name_, CClassCPU &cpu_,
     const BaseCClassCPUParams &params,
+    Latch<BranchData>::Output branch_,
     Latch<Fetch1ThreadInfo>::Output in_thread_,
     Latch<ForwardLineData>::Input out_,
     std::vector<InputBuffer<ForwardLineData>> &next_stage_input_buffer) :
     Named(name_),
     cpu(cpu_),
+    branch(branch_),
     in_thread(in_thread_),
     out(out_),
     nextStageReserve(next_stage_input_buffer),
@@ -36,6 +38,8 @@ Fetch2::Fetch2(const std::string &name_, CClassCPU &cpu_,
     transfers(name_ + ".transfers", "lines", params.fetch1FetchLimit),
     icacheState(IcacheRunning),
     lineSeqNum(InstId::firstLineSeqNum),
+    streamSeqNum(params.numThreads, InstId::firstStreamSeqNum),
+    predictionSeqNum(params.numThreads, InstId::firstPredictionSeqNum),
     numFetchesInMemorySystem(0),
     numFetchesInITLB(0),
     icachePort(cpu.name() + ".icache_port", *this, cpu)
@@ -362,6 +366,9 @@ Fetch2::processResponse(Fetch2::FetchRequestPtr response,
 }
 void 
 Fetch2::evaluate(){
+    if (checkRedirect())
+        return;
+
     ThreadID fetch_tid = in_thread.outputWire->tid;
     //const Fetch1ThreadInfo* thread = getInput(fetch_tid);
     if( fetchState == FetchWaiting ){
@@ -467,11 +474,17 @@ bool Fetch2::FetchRequest::isDiscardable() const
 {
     const Fetch1ThreadInfo *thread = fetch.getInput(id.threadId);
 
-
     /* Can't discard lines in TLB/memory */
-    return state != InTranslation && state != RequestIssuing &&
-        (id.streamSeqNum != thread->streamSeqNum ||
-        id.predictionSeqNum != thread->predictionSeqNum);
+    if (state == InTranslation || state == RequestIssuing)
+        return false;
+
+    if (thread) {
+        return id.streamSeqNum != thread->streamSeqNum ||
+            id.predictionSeqNum != thread->predictionSeqNum;
+    }
+
+    return id.streamSeqNum != fetch.streamSeqNum[id.threadId] ||
+        id.predictionSeqNum != fetch.predictionSeqNum[id.threadId];
 }
 
 void
@@ -483,6 +496,32 @@ Fetch2::popInput(ThreadID tid)
     DPRINTF(CClassCPU,"have popped from isb\n");
 
     //fetchInfo[tid].inputIndex = 0;
+}
+
+bool
+Fetch2::checkRedirect()
+{
+    const BranchData &branch_data = *branch.outputWire;
+
+    if (branch_data.isBubble())
+        return false;
+
+    DPRINTF(CClassCPU, "Fetch2 saw branch data: %s\n", branch_data);
+
+    if (!branch_data.isStreamChange())
+        return false;
+
+    ThreadID tid = branch_data.threadId;
+    streamSeqNum[tid] = branch_data.newStreamSeqNum;
+    predictionSeqNum[tid] = branch_data.newPredictionSeqNum;
+
+    while (!inputBuffer[tid].empty())
+        inputBuffer[tid].pop();
+
+    fetch2_thread = nullptr;
+    fetchState = FetchWaiting;
+
+    return true;
 }
 
 const Fetch1ThreadInfo *

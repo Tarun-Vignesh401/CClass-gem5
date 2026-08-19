@@ -21,7 +21,9 @@ namespace gem5
 
         Fetch2(const std::string &name_, CClassCPU &cpu_,
             const BaseCClassCPUParams &params,
-            Latch<Fetch1ThreadInfo>::Output in_thread_, Latch<ForwardLineData>::Input out_,
+            Latch<BranchData>::Output branch_,
+            Latch<Fetch1ThreadInfo>::Output in_thread_,
+            Latch<ForwardLineData>::Input out_,
             std::vector<InputBuffer<ForwardLineData>> &next_stage_input_buffer);
 
         void finaldebugprint(ThreadID tid,const Fetch1ThreadInfo* thread);
@@ -33,6 +35,8 @@ namespace gem5
         CClassCPU &cpu;
 
         Latch<Fetch1ThreadInfo>::Output in_thread;
+
+        Latch<BranchData>::Output branch;
 
         Latch<ForwardLineData>::Input out;
 
@@ -51,6 +55,9 @@ namespace gem5
         InstSeqNum lineSeqNum;
 
         ThreadID threadPriority;
+
+        std::vector<InstSeqNum> streamSeqNum;
+        std::vector<InstSeqNum> predictionSeqNum;
         //I don't need it right now let's see if I need it later.
         const Fetch1ThreadInfo* fetch2_thread;
 
@@ -182,6 +189,8 @@ namespace gem5
         void stepQueues();
 
         void popInput(ThreadID tid);
+
+        bool checkRedirect();
 
         const Fetch1ThreadInfo* getInput(ThreadID tid);
 
