@@ -35,6 +35,8 @@ protected:
         DecodeThreadInfo(const DecodeThreadInfo& other) :
             inputIndex(other.inputIndex),
             lastStreamSeqNum(other.lastStreamSeqNum),
+            execSeqNum(other.execSeqNum),
+            fetchSeqNum(other.fetchSeqNum),
             expectedStreamSeqNum(other.expectedStreamSeqNum),
             predictionSeqNum(other.predictionSeqNum),
             havePC(other.havePC),
@@ -55,6 +57,9 @@ protected:
         /** Decode is the source of fetch sequence numbers.  These represent the
          *  sequence that instructions were extracted from fetched lines. */
         InstSeqNum fetchSeqNum = InstId::firstFetchSeqNum;
+
+        /** Decode is the source of execute sequence numbers. */
+        InstSeqNum execSeqNum = InstId::firstExecSeqNum;
 
         /** Stream sequence number remembered from last time the
          *  predictionSeqNum changed.  Lines should only be discarded when their

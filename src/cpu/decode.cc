@@ -186,9 +186,7 @@ if (!inp.outputWire->isBubble())
                 /* CClassCPU and prediction sequence numbers originate here */
                 dyn_inst->id.fetchSeqNum = decode_info.fetchSeqNum;
                 dyn_inst->id.predictionSeqNum = decode_info.predictionSeqNum;
-                /* To complete the set, test that exec sequence number has
-                 *  not been set */
-                assert(dyn_inst->id.execSeqNum == 0);
+                dyn_inst->id.execSeqNum = decode_info.execSeqNum;
                 
                 set(dyn_inst->pc, decode_info.pc);
 
@@ -245,9 +243,7 @@ if (!inp.outputWire->isBubble())
                     /* CClassCPU and prediction sequence numbers originate here */
                     dyn_inst->id.fetchSeqNum = decode_info.fetchSeqNum;
                     dyn_inst->id.predictionSeqNum = decode_info.predictionSeqNum;
-                    /* To complete the set, test that exec sequence number
-                     *  has not been set */
-                    assert(dyn_inst->id.execSeqNum == 0);
+                    dyn_inst->id.execSeqNum = decode_info.execSeqNum;
                     set(dyn_inst->pc, decode_info.pc);
                     DPRINTF(CClassCPU, "decoder inst %s\n", *dyn_inst);
 
@@ -305,6 +301,7 @@ if (!inp.outputWire->isBubble())
             if (dyn_inst) {
                 /* Step to next sequence number */
                 decode_info.fetchSeqNum++;
+                decode_info.execSeqNum++;
 
                 /* Correctly size the output before writing */
                 if (output_index == 0) {
