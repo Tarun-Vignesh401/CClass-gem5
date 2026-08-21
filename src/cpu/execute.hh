@@ -44,6 +44,8 @@ class Execute : public Named
     Latch<ForwardInstData>::Input out_FBOX;
 
     CClassCPU &cpu;
+
+    bool stalled;
         
     unsigned int memoryIssueLimit;
 

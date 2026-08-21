@@ -20,17 +20,25 @@ class Memory : public Named
 {
   protected:
     CClassCPU &cpu;
-    Latch<ForwardMemData>::Output inp;
+    Latch<ForwardInstData>::Output in_BASE;
+    Latch<ForwardMemData>::Output  in_MEMORY;
+    Latch<ForwardInstData>::Output in_TRAP;
+    Latch<ForwardInstData>::Output in_MBOX;
+    Latch<ForwardInstData>::Output in_FBOX;
 
   public:
-    std::vector<InputBuffer<ForwardMemData>> inputBuffer;
+    std::vector<InputBuffer<ForwardMemData>> inputBuffer_MEMORY;
+    std::vector<InputBuffer<ForwardInstData>> inputBuffer_BASE;
+    std::vector<InputBuffer<ForwardInstData>> inputBuffer_TRAP;
+    std::vector<InputBuffer<ForwardInstData>> inputBuffer_MBOX;
+    std::vector<InputBuffer<ForwardInstData>> inputBuffer_FBOX;
 
     Memory(const std::string &name_, CClassCPU &cpu_,
         const BaseCClassCPUParams &params,
         Latch<ForwardMemData>::Output inp_);
 
-    void evaluate();
-    void advance();
+    //void evaluate();
+    //void advance();
 
   protected:
     const ForwardMemData *getInput(ThreadID tid);

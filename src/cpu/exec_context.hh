@@ -28,22 +28,6 @@ namespace cclass
 
 class Execute;
 
-struct ForwardingSource
-{
-    bool valid = false;
-    const StaticInst *staticInst = nullptr;
-    unsigned int destIndex = 0;
-    RegVal value = 0;
-};
-
-struct RiscvControlResolution
-{
-    bool isControl = false;
-    bool resolved = false;
-    bool taken = false;
-    std::unique_ptr<PCStateBase> target;
-};
-
 class ExecContext : public gem5::ExecContext
 {
   public:
@@ -70,16 +54,6 @@ class ExecContext : public gem5::ExecContext
         inst->setPredicate(readPredicate());
         inst->setMemAccPredicate(readMemAccPredicate());
     }
-
-    bool readSourceWithForwarding(const StaticInst *si, int src_idx,
-        const std::vector<ForwardingSource> &mem_exe_forwards,
-        const std::vector<ForwardingSource> &mem_wb_forwards,
-        RegVal &value) const;
-
-    bool resolveRiscvControl(const StaticInst *si,
-        const std::vector<ForwardingSource> &mem_exe_forwards,
-        const std::vector<ForwardingSource> &mem_wb_forwards,
-        RiscvControlResolution &resolution) const;
 
     Fault initiateMemRead(Addr addr, unsigned int size, Request::Flags flags,
         const std::vector<bool> &byte_enable) override;

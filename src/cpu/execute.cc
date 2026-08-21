@@ -63,6 +63,7 @@ Execute::Execute(const std::string &name_, CClassCPU &cpu_,
       out_MBOX(out_MBOX),
       out_FBOX(out_FBOX),
       cpu(cpu_),
+      stalled(false),
       issueLimit(params.executeIssueLimit),
       memoryIssueLimit(params.executeMemoryIssueLimit),
       InputBufferSize(params.executeInputBufferLimit),
@@ -664,7 +665,7 @@ Execute::trytoPush(ThreadID tid){
                 auto request_key = std::make_pair(tid, inst->id.execSeqNum);
                 ExecRequestPtr mem_request;
                 auto request_it = pendingMemRequests.find(request_key);
-
+                // if key isn't found it goes to end of the map.
                 if (request_it != pendingMemRequests.end()) {
                     mem_request = request_it->second;
                 } else {
@@ -678,7 +679,7 @@ Execute::trytoPush(ThreadID tid){
                     if (mem_request)
                         pendingMemRequests[request_key] = mem_request;
                 }
-
+                //fault
                 if (inst->fault != NoFault) {
                     pendingMemRequests.erase(request_key);
                     if (pushInstToLatch(tid, inst)) {
@@ -686,7 +687,8 @@ Execute::trytoPush(ThreadID tid){
                         it = thread.inFlightInsts.erase(it);
                         continue;
                     }
-                } else if (mem_request && mem_request->failed()) {
+                } // mem request failed 
+                else if (mem_request && mem_request->failed()) {
                     inst->fault = mem_request->fault;
                     pendingMemRequests.erase(request_key);
                     if (pushInstToLatch(tid, inst)) {
@@ -730,7 +732,7 @@ Execute::trytoPush(ThreadID tid){
         ++it;
     }
 
-    cleanupInFlightInsts(tid);
+    //cleanupInFlightInsts(tid);
 }
 
 void
@@ -1057,7 +1059,7 @@ Execute::initiateMemAccess(CClassDynInstPtr inst, ExecRequestPtr &request)
 Fault
 Execute::initiateMemRead(CClassDynInstPtr inst, Addr addr, unsigned int size,
     Request::Flags flags, const std::vector<bool> &byte_enable)
-{
+{   //data here is nullptr
     auto request = std::make_shared<ExecRequest>(
         *this, inst, true, nullptr, size, nullptr);
 
