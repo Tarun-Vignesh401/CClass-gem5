@@ -1,0 +1,408 @@
+
+/**
+ * @file
+ *
+ *  Contains class definitions for data flowing between pipeline stages in
+ *  the top-level structure portion of this model.  Latch types are also
+ *  defined which pair forward/backward flowing data specific to each stage
+ *  pair.
+ *
+ *  No post-configuration inter-stage communication should *ever* take place
+ *  outside these classes (except for reservation!)
+ */
+
+#ifndef __CPU_CCLASS_PIPE_DATA_HH__
+#define __CPU_CCLASS_PIPE_DATA_HH__
+
+#include <memory>
+#include <vector>
+
+#include "cpu/cclass/buffers.hh"
+#include "cpu/cclass/dyn_inst.hh"
+#include "cpu/base.hh"
+
+#include "cpu/cclass/dyn_inst.hh"
+#include "arch/generic/mmu.hh"
+#include "mem/packet.hh"
+#include "mem/request.hh"
+
+namespace gem5
+{
+
+namespace cclass
+{
+
+class Execute;
+
+class ExecRequest;
+using ExecRequestPtr = std::shared_ptr<ExecRequest>;
+    
+   //this enum is primarily for multithreading support.
+  enum Fetch1State {
+                PCGenHalted,
+                PCGenRunning,
+                PCWaitingForChange,    
+            };
+  class Fetch1ThreadInfo
+  {
+    public:
+    Fetch1ThreadInfo() = default;
+
+    Fetch1ThreadInfo(const Fetch1ThreadInfo& other) :
+        bubbleFlag(other.bubbleFlag),
+        state(other.state),
+        streamSeqNum(other.streamSeqNum),
+        predictionSeqNum(other.predictionSeqNum),
+        blocked(other.blocked),
+        wakeupGuard(other.wakeupGuard),
+        FetchAddr(other.FetchAddr),
+        tid(other.tid)
+    {
+        if (other.pc)
+            set(pc,other.pc);
+    }
+    Fetch1State state = PCWaitingForChange;
+    bool bubbleFlag = true;
+    std::unique_ptr<PCStateBase> pc;
+    InstSeqNum streamSeqNum = InstId::firstStreamSeqNum;
+    InstSeqNum predictionSeqNum = InstId::firstPredictionSeqNum;
+    bool blocked = false;
+    bool wakeupGuard = false;
+    Addr FetchAddr = 0;
+    ThreadID tid = 0;
+
+
+    static Fetch1ThreadInfo bubble()
+    {
+        return Fetch1ThreadInfo();
+    }
+
+    bool isBubble() const
+    {
+        return bubbleFlag;
+    }
+
+    void makeValid()
+    {
+        bubbleFlag = false;
+    }
+
+  };
+
+class ForwardLineData{
+        private:
+    /** This line is a bubble.  No other data member is required to be valid
+     *  if this is true
+     *  Make lines bubbles by default */
+    bool bubbleFlag = true;
+
+  public:
+    /** First byte address in the line.  This is allowed to be
+     *  <= pc.instAddr() */
+    Addr lineBaseAddr = 0;
+
+    /** PC of the first inst within this sequence */
+    std::unique_ptr<PCStateBase> pc;
+
+    /** Address of this line of data */
+    Addr fetchAddr;
+
+    /** Explicit line width, don't rely on data.size */
+    unsigned int lineWidth = 0;
+
+  public:
+    /** This line has a fault.  The bubble flag will be false and seqNums
+     *  will be valid but no data will */
+    Fault fault = NoFault;
+
+    /** Thread, stream, prediction ... id of this line */
+    InstId id;
+
+    /** Line data.  line[0] is the byte at address pc.instAddr().  Data is
+     *  only valid upto lineWidth - 1. */
+    uint8_t *line = nullptr;
+
+    /** Packet from which the line is taken */
+    Packet *packet = nullptr;
+
+  public:
+    ForwardLineData() {}
+    ForwardLineData(const ForwardLineData &other) :
+        bubbleFlag(other.bubbleFlag), lineBaseAddr(other.lineBaseAddr),
+        pc(other.pc->clone()), fetchAddr(other.fetchAddr),
+        lineWidth(other.lineWidth), fault(other.fault), id(other.id),
+        line(other.line), packet(other.packet)
+    {}
+    ForwardLineData &
+    operator=(const ForwardLineData &other)
+    {
+        bubbleFlag = other.bubbleFlag;
+        lineBaseAddr = other.lineBaseAddr;
+        set(pc, other.pc);
+        fetchAddr = other.fetchAddr;
+        lineWidth = other.lineWidth;
+        fault = other.fault;
+        id = other.id;
+        line = other.line;
+        packet = other.packet;
+        return *this;
+    }
+
+    ~ForwardLineData() { line = NULL; }
+
+  public:
+    /** This is a fault, not a line */
+    bool isFault() const { return fault != NoFault; }
+
+    /** Set fault and possible clear the bubble flag */
+    void setFault(Fault fault_);
+
+    /** In-place initialise a ForwardLineData, freeing and overridding the
+     *  line */
+    void allocateLine(unsigned int width_);
+
+    /** Use the data from a packet as line instead of allocating new
+     *  space.  On destruction of this object, the packet will be destroyed */
+    void adoptPacketData(Packet *packet);
+
+    /** Free this ForwardLineData line.  Note that these are shared between
+     *  line objects and so you must be careful when deallocating them.
+     *  Copying of ForwardLineData can, therefore, be done by default copy
+     *  constructors/assignment */
+    void freeLine();
+
+    /** BubbleIF interface */
+    static ForwardLineData bubble() { return ForwardLineData(); }
+    bool isBubble() const { return bubbleFlag; }
+
+    /** ReportIF interface */
+    void reportData(std::ostream &os) const;
+};
+
+/** Maximum number of instructions that can be carried by the pipeline. */
+const unsigned int MAX_FORWARD_INSTS = 4;
+
+
+
+class ForwardInstData /* : public ReportIF, public BubbleIF */
+{
+  public:
+    /** Array of carried insts, ref counted */
+    CClassDynInstPtr insts[MAX_FORWARD_INSTS];
+
+    /** The number of insts slots that can be expected to be valid insts */
+    unsigned int numInsts;
+
+    /** Thread associated with these instructions */
+    ThreadID threadId;
+
+  public:
+    explicit ForwardInstData(unsigned int width = 0,
+                             ThreadID tid = InvalidThreadID);
+
+    ForwardInstData(const ForwardInstData &src);
+
+  public:
+    /** Number of instructions carried by this object */
+    unsigned int width() const { return numInsts; }
+
+    /** Copy the inst array only as far as numInsts */
+    ForwardInstData &operator =(const ForwardInstData &src);
+
+    /** Resize a bubble/empty ForwardInstData and fill with bubbles */
+    void resize(unsigned int width);
+
+    /** Fill with bubbles from 0 to width() - 1 */
+    void bubbleFill();
+
+    /** BubbleIF interface */
+    bool isBubble() const;
+
+    /** ReportIF interface */
+    //void reportData(std::ostream &os) const;
+};
+
+class ExecRequest : public Packet::SenderState, public BaseMMU::Translation
+{
+  public:
+    enum State
+    {
+        NotIssued,
+        InTranslation,
+        Translated,
+        SentToCache,
+        WaitingRetry,
+        Complete,
+        Failed
+    };
+
+    Execute &execute;
+    CClassDynInstPtr inst;
+    RequestPtr request;
+    PacketPtr packet = nullptr;
+    bool isLoad = false;
+    bool isStore = false;
+    State state = NotIssued;
+    Fault fault = NoFault;
+    std::vector<uint8_t> data;
+    uint64_t *res = nullptr;
+
+    ExecRequest(Execute &execute_, CClassDynInstPtr inst_, bool is_load,
+        uint8_t *store_data, unsigned int size, uint64_t *res_);
+
+    bool sent() const { return state == SentToCache; }
+    bool complete() const { return state == Complete; }
+    bool waitingRetry() const { return state == WaitingRetry; }
+    bool failed() const { return state == Failed || fault != NoFault; }
+
+    void markInTranslation() { state = InTranslation; }
+    void markTranslated() { state = Translated; }
+    void markSent() { state = SentToCache; }
+    void markRetry() { state = WaitingRetry; }
+    void markFault(Fault fault_);
+    void markComplete(PacketPtr response);
+    PacketPtr makePacket();
+
+    void markDelayed() override {}
+    void finish(const Fault &fault_, const RequestPtr &req,
+        ThreadContext *tc, BaseMMU::Mode mode) override;
+};
+
+class ForwardMemData
+{
+  public:
+    ExecRequestPtr request;
+    ThreadID threadId = InvalidThreadID;
+
+    ForwardMemData() = default;
+    ForwardMemData(ExecRequestPtr request_, ThreadID tid) :
+        request(request_), threadId(tid)
+    { }
+
+    static ForwardMemData bubble() { return ForwardMemData(); }
+    bool isBubble() const { return !request; }
+};
+
+
+class BranchData /* : public ReportIF, public BubbleIF */
+{
+  public:
+    enum Reason
+    {
+        /* *** No change of stream (information to branch prediction) */
+
+        /* Don't branch at all (bubble) */
+        NoBranch,
+        /* Don't branch, but here's the details of a correct prediction
+         * that was executed */
+        CorrectlyPredictedBranch,
+
+        /* *** Change of stream */
+
+        /* Take an unpredicted branch */
+        UnpredictedBranch,
+        /* Take a branch on branch prediction data (from Fetch2) */
+        BranchPrediction,
+        /* Prediction of wrong target PC */
+        BadlyPredictedBranchTarget,
+        /* Bad branch prediction (didn't actually branch).  Need to branch
+         *  back to correct stream.  If the target is wrong, use
+         *  BadlyPredictedBranchTarget */
+        BadlyPredictedBranch,
+        /* Suspend fetching for this thread (inst->id.threadId).
+         * This will be woken up by another stream changing branch so
+         * count it as stream changing itself and expect pc to be the PC
+         * of the next instruction */
+        SuspendThread,
+        /* Branch from an interrupt (no instruction) */
+        Interrupt,
+        /* Stop fetching in anticipation of of draining */
+        HaltFetch
+    };
+
+    /** Is a request with this reason actually a request to change the
+     *  PC rather than a bubble or branch prediction information */
+    static bool isStreamChange(const BranchData::Reason reason);
+
+    /** Is a request with this reason actually a 'real' branch, that is,
+     *  a stream change that's not just an instruction to Fetch1 to halt
+     *  or wake up */
+    static bool isBranch(const BranchData::Reason reason);
+
+  public:
+    /** Explanation for this branch */
+    Reason reason = NoBranch;
+
+    /** ThreadID associated with branch */
+    ThreadID threadId = InvalidThreadID;
+
+    /** Sequence number of new stream/prediction to be adopted */
+    InstSeqNum newStreamSeqNum = 0;
+    InstSeqNum newPredictionSeqNum = 0;
+
+    /** Starting PC of that stream */
+    std::unique_ptr<PCStateBase> target;
+
+    /** Instruction which caused this branch */
+    CClassDynInstPtr inst = CClassDynInst::bubble();
+
+  public:
+    BranchData() {}
+
+    BranchData(Reason reason_, ThreadID thread_id,
+            InstSeqNum new_stream_seq_num, InstSeqNum new_prediction_seq_num,
+            const PCStateBase &_target, CClassDynInstPtr inst_) :
+        reason(reason_), threadId(thread_id),
+        newStreamSeqNum(new_stream_seq_num),
+        newPredictionSeqNum(new_prediction_seq_num),
+        inst(inst_)
+    {
+        set(target, _target);
+    }
+
+    BranchData(const BranchData &other) :
+        reason(other.reason), threadId(other.threadId),
+        newStreamSeqNum(other.newStreamSeqNum),
+        newPredictionSeqNum(other.newPredictionSeqNum),
+        inst(other.inst)
+    {
+        set(target, other.target);
+    }
+    BranchData &
+    operator=(const BranchData &other)
+    {
+        reason = other.reason;
+        threadId = other.threadId;
+        newStreamSeqNum = other.newStreamSeqNum;
+        newPredictionSeqNum = other.newPredictionSeqNum;
+        set(target, other.target);
+        inst = other.inst;
+        return *this;
+    }
+
+    /** BubbleIF interface */
+    static BranchData bubble() { return BranchData(); }
+    bool isBubble() const { return reason == NoBranch; }
+
+    /** As static isStreamChange but on this branch data */
+    bool isStreamChange() const { return isStreamChange(reason); }
+
+    /** As static isBranch but on this branch data */
+    bool isBranch() const { return isBranch(reason); }
+
+    /** ReportIF interface */
+    void reportData(std::ostream &os) const;
+};
+
+/** Print a branch reason enum */
+std::ostream &operator <<(std::ostream &os, BranchData::Reason reason);
+
+/** Print BranchData contents in a format suitable for DPRINTF comments, not
+ *  for CClassTrace */
+std::ostream &operator <<(std::ostream &os, const BranchData &branch);
+
+
+} // namespace minor
+} // namespace gem5
+
+#endif /* __CPU_MINOR_PIPE_DATA_HH__ */

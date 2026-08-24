@@ -1,0 +1,317 @@
+diff --git a/configs/learning_gem5/part1/simple-riscv.py b/configs/learning_gem5/part1/simple-riscv.py
+index ae5e36c6e7..02ee7e8781 100644
+--- a/configs/learning_gem5/part1/simple-riscv.py
++++ b/configs/learning_gem5/part1/simple-riscv.py
+@@ -7,7 +7,7 @@
+ # notice, this list of conditions and the following disclaimer;
+ # redistributions in binary form must reproduce the above copyright
+ # notice, this list of conditions and the following disclaimer in the
+-# documentation and/or other materials provided with the distribution;
++# documentation and/or other mate rials provided with the distribution;
+ # neither the name of the copyright holders nor the names of its
+ # contributors may be used to endorse or promote products derived from
+ # this software without specific prior written permission.
+@@ -31,6 +31,8 @@ X86 ISA). More detailed documentation can be found in `simple.py`.
+ 
+ import m5
+ from m5.objects import *
++from caches import *
++
+ 
+ system = System()
+ 
+@@ -40,12 +42,18 @@ system.clk_domain.voltage_domain = VoltageDomain()
+ 
+ system.mem_mode = "timing"
+ system.mem_ranges = [AddrRange("512MiB")]
+-system.cpu = RiscvTimingSimpleCPU()
++system.cpu = RiscvCClassCPU()
+ 
+ system.membus = SystemXBar()
+ 
+-system.cpu.icache_port = system.membus.cpu_side_ports
+-system.cpu.dcache_port = system.membus.cpu_side_ports
++system.cpu.icache = L1ICache()
++system.cpu.dcache = L1DCache()
++
++system.cpu.icache.connectCPU(system.cpu)
++system.cpu.dcache.connectCPU(system.cpu)
++
++system.cpu.icache.connectBus(system.membus)
++system.cpu.dcache.connectBus(system.membus)
+ 
+ system.cpu.createInterruptController()
+ 
+diff --git a/src/SConscript b/src/SConscript
+index 6ee08cc28c..d8d9354b79 100644
+--- a/src/SConscript
++++ b/src/SConscript
+@@ -82,6 +82,7 @@ class SourceLib(SourceItem):
+         super().__init__(*args, **kwargs)
+ 
+ build_tools = Dir('#build_tools')
++sim_object_param_headers = []
+ 
+ # Build a small helper that runs Python code using the same version of Python
+ # as gem5. This is in an unorthodox location to avoid building it for every
+@@ -171,12 +172,13 @@ class SimObject(PySource):
+ 
+             # Params header.
+             params_hh = build_dir.File(f'params/{simobj}.hh').get_abspath()
+-            gem5py_env.Command([ "${PARAMS_HH}" ], srcs,
++            params_hh_node = gem5py_env.Command([ "${PARAMS_HH}" ], srcs,
+                     MakeAction(cmdline('PARAMS_HH'), Transform("SO Param", 2)),
+                     MODULE=module,
+                     SIMOBJ=simobj,
+                     PYSCRIPT=build_tools.File('sim_object_param_struct_hh.py'),
+-                    PARAMS_HH=params_hh)
++                    PARAMS_HH=params_hh)[0]
++            sim_object_param_headers.append(params_hh_node)
+ 
+             # Params cc.
+             cc_file = build_dir.File(f'python/_m5/param_{simobj}.cc')
+@@ -364,7 +366,13 @@ class TopLevelBase(object, metaclass=TopLevelMeta):
+         return libs
+ 
+     def srcs_to_objs(self, env, sources):
+-        return list([ s.static(env) for s in sources ])
++        objs = []
++        for source in sources:
++            obj = source.static(env)
++            if '/python/_m5/param_' in source.tnode.abspath:
++                env.Depends(obj, sim_object_param_headers)
++            objs.append(obj)
++        return objs
+ 
+     @classmethod
+     def declare_all(cls, env):
+diff --git a/src/arch/riscv/RiscvCPU.py b/src/arch/riscv/RiscvCPU.py
+index 2b1b053b48..ee0f0bc217 100644
+--- a/src/arch/riscv/RiscvCPU.py
++++ b/src/arch/riscv/RiscvCPU.py
+@@ -28,6 +28,7 @@ from m5.objects.BaseMinorCPU import BaseMinorCPU
+ from m5.objects.BaseNonCachingSimpleCPU import BaseNonCachingSimpleCPU
+ from m5.objects.BaseO3CPU import BaseO3CPU
+ from m5.objects.BaseTimingSimpleCPU import BaseTimingSimpleCPU
++from m5.objects.BaseCClassCPU import BaseCClassCPU
+ from m5.objects.RiscvDecoder import RiscvDecoder
+ from m5.objects.RiscvInterrupts import RiscvInterrupts
+ from m5.objects.RiscvISA import RiscvISA
+@@ -59,3 +60,6 @@ class RiscvO3CPU(BaseO3CPU, RiscvCPU):
+ 
+ class RiscvMinorCPU(BaseMinorCPU, RiscvCPU):
+     mmu = RiscvMMU()
++
++class RiscvCClassCPU(BaseCClassCPU, RiscvCPU):
++    mmu = RiscvMMU()
+diff --git a/src/cpu/minor/execute.hh b/src/cpu/minor/execute.hh
+index f2bea0f775..e178a27485 100644
+--- a/src/cpu/minor/execute.hh
++++ b/src/cpu/minor/execute.hh
+@@ -363,6 +363,7 @@ class Execute : public Named
+         statistics::Vector2d issuedInstType;
+     } issueStats;
+ };
++   
+ 
+ } // namespace minor
+ } // namespace gem5
+diff --git a/src/cpu/minor/fetch1.hh b/src/cpu/minor/fetch1.hh
+index b65bb70d7b..517073d5c4 100644
+--- a/src/cpu/minor/fetch1.hh
++++ b/src/cpu/minor/fetch1.hh
+@@ -1,39 +1,3 @@
+-/*
+- * Copyright (c) 2013-2014 ARM Limited
+- * All rights reserved
+- *
+- * The license below extends only to copyright in the software and shall
+- * not be construed as granting a license to any other intellectual
+- * property including but not limited to intellectual property relating
+- * to a hardware implementation of the functionality of the software
+- * licensed hereunder.  You may use the software subject to the license
+- * terms below provided that you ensure that this notice is replicated
+- * unmodified and in its entirety in all distributions of the software,
+- * modified or unmodified, in source code or in binary form.
+- *
+- * Redistribution and use in source and binary forms, with or without
+- * modification, are permitted provided that the following conditions are
+- * met: redistributions of source code must retain the above copyright
+- * notice, this list of conditions and the following disclaimer;
+- * redistributions in binary form must reproduce the above copyright
+- * notice, this list of conditions and the following disclaimer in the
+- * documentation and/or other materials provided with the distribution;
+- * neither the name of the copyright holders nor the names of its
+- * contributors may be used to endorse or promote products derived from
+- * this software without specific prior written permission.
+- *
+- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+- * OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+- */
+ 
+ /**
+  * @file
+diff --git a/src/cpu/minor/fetch2.cc b/src/cpu/minor/fetch2.cc
+index 5a557a207d..80d63948eb 100644
+--- a/src/cpu/minor/fetch2.cc
++++ b/src/cpu/minor/fetch2.cc
+@@ -389,6 +389,9 @@ Fetch2::evaluate()
+                             line_in->lineBaseAddr + fetch_info.inputIndex);
+                 }
+ 
++                DPRINTF(Fetch, "Decoding the line at the tick: %llu\n",
++                        (unsigned long long)curTick());
++
+                 /* Maybe make the above a loop to accomodate ISAs with
+                  *  instructions longer than sizeof(MachInst) */
+ 
+@@ -398,6 +401,7 @@ Fetch2::evaluate()
+                      *  decode */
+                     StaticInstPtr decoded_inst =
+                         decoder->decode(*fetch_info.pc);
++                    
+ 
+                     /* Make a new instruction and pick up the line, stream,
+                      *  prediction, thread ids from the incoming line */
+diff --git a/src/cpu/minor/pipe_data.hh b/src/cpu/minor/pipe_data.hh
+index 15de50e984..0085a41092 100644
+--- a/src/cpu/minor/pipe_data.hh
++++ b/src/cpu/minor/pipe_data.hh
+@@ -1,39 +1,4 @@
+-/*
+- * Copyright (c) 2013-2014 ARM Limited
+- * All rights reserved
+- *
+- * The license below extends only to copyright in the software and shall
+- * not be construed as granting a license to any other intellectual
+- * property including but not limited to intellectual property relating
+- * to a hardware implementation of the functionality of the software
+- * licensed hereunder.  You may use the software subject to the license
+- * terms below provided that you ensure that this notice is replicated
+- * unmodified and in its entirety in all distributions of the software,
+- * modified or unmodified, in source code or in binary form.
+- *
+- * Redistribution and use in source and binary forms, with or without
+- * modification, are permitted provided that the following conditions are
+- * met: redistributions of source code must retain the above copyright
+- * notice, this list of conditions and the following disclaimer;
+- * redistributions in binary form must reproduce the above copyright
+- * notice, this list of conditions and the following disclaimer in the
+- * documentation and/or other materials provided with the distribution;
+- * neither the name of the copyright holders nor the names of its
+- * contributors may be used to endorse or promote products derived from
+- * this software without specific prior written permission.
+- *
+- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+- * OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+- */
++
+ 
+ /**
+  * @file
+diff --git a/src/cpu/minor/stats.cc b/src/cpu/minor/stats.cc
+index e4eebd3355..bf648dbc62 100644
+--- a/src/cpu/minor/stats.cc
++++ b/src/cpu/minor/stats.cc
+@@ -1,39 +1,3 @@
+-/*
+- * Copyright (c) 2012-2014 ARM Limited
+- * All rights reserved
+- *
+- * The license below extends only to copyright in the software and shall
+- * not be construed as granting a license to any other intellectual
+- * property including but not limited to intellectual property relating
+- * to a hardware implementation of the functionality of the software
+- * licensed hereunder.  You may use the software subject to the license
+- * terms below provided that you ensure that this notice is replicated
+- * unmodified and in its entirety in all distributions of the software,
+- * modified or unmodified, in source code or in binary form.
+- *
+- * Redistribution and use in source and binary forms, with or without
+- * modification, are permitted provided that the following conditions are
+- * met: redistributions of source code must retain the above copyright
+- * notice, this list of conditions and the following disclaimer;
+- * redistributions in binary form must reproduce the above copyright
+- * notice, this list of conditions and the following disclaimer in the
+- * documentation and/or other materials provided with the distribution;
+- * neither the name of the copyright holders nor the names of its
+- * contributors may be used to endorse or promote products derived from
+- * this software without specific prior written permission.
+- *
+- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+- * OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+- */
+ 
+ #include "cpu/minor/stats.hh"
+ 
+diff --git a/src/cpu/minor/stats.hh b/src/cpu/minor/stats.hh
+index 98ac80f15c..4fa8a03449 100644
+--- a/src/cpu/minor/stats.hh
++++ b/src/cpu/minor/stats.hh
+@@ -1,39 +1,3 @@
+-/*
+- * Copyright (c) 2011-2014 ARM Limited
+- * All rights reserved
+- *
+- * The license below extends only to copyright in the software and shall
+- * not be construed as granting a license to any other intellectual
+- * property including but not limited to intellectual property relating
+- * to a hardware implementation of the functionality of the software
+- * licensed hereunder.  You may use the software subject to the license
+- * terms below provided that you ensure that this notice is replicated
+- * unmodified and in its entirety in all distributions of the software,
+- * modified or unmodified, in source code or in binary form.
+- *
+- * Redistribution and use in source and binary forms, with or without
+- * modification, are permitted provided that the following conditions are
+- * met: redistributions of source code must retain the above copyright
+- * notice, this list of conditions and the following disclaimer;
+- * redistributions in binary form must reproduce the above copyright
+- * notice, this list of conditions and the following disclaimer in the
+- * documentation and/or other materials provided with the distribution;
+- * neither the name of the copyright holders nor the names of its
+- * contributors may be used to endorse or promote products derived from
+- * this software without specific prior written permission.
+- *
+- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+- * OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+- */
+ 
+ /**
+  * @file
