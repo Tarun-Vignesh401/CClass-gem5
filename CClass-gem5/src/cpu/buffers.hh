@@ -152,31 +152,6 @@ class CClassBuffer : public Named, public TimeBuffer<ElemType>
         return ret;
     }
 
-    /** Report buffer states from 'slot' 'from' to 'to'.  For example 0,-1
-      * will produce two slices with current (just assigned) and last (one
-      * advance() old) slices with the current (0) one on the left.
-      * Reverse the numbers to change the order of slices */
-     /*
-    void
-    minorTrace() const
-    {
-        std::ostringstream data;
-
-        int step = (reportLeft > reportRight ? -1 : 1);
-        int end = reportRight + step;
-        int i = reportLeft;
-
-        while (i != end) {
-            const ElemType &datum = (*this)[i];
-
-            ReportTraits::reportData(data, datum);
-            i += step;
-            if (i != end)
-                data << ',';
-        }
-
-        minor::minorTrace("%s=%s\n", dataName, data.str());
-    }*/
 };
 
 /** Wraps a MinorBuffer with Input/Output interfaces to ensure that units
@@ -471,51 +446,6 @@ class Queue : public Named, public Reservable
     /** Is the queue empty? */
     bool empty() const { return queue.empty(); }
 
-    /*void
-    minorTrace() const
-    {
-        std::ostringstream data;
-        /* If we become over-full, totalSpace() can actually be smaller than
-         * occupiedSpace().  Handle this 
-        unsigned int num_total = (occupiedSpace() > totalSpace() ?
-            occupiedSpace() : totalSpace());
-
-        unsigned int num_reserved = reservedSpace();
-        unsigned int num_occupied = occupiedSpace();
-
-        int num_printed = 1;
-        /* Bodge to rotate queue to report elements 
-        while (num_printed <= num_occupied) {
-            ReportTraits::reportData(data, queue[num_printed - 1]);
-            num_printed++;
-
-            if (num_printed <= num_total)
-                data << ',';
-        }
-
-        int num_printed_reserved = 1;
-        /* Show reserved slots 
-        while (num_printed_reserved <= num_reserved &&
-            num_printed <= num_total)
-        {
-            data << 'R';
-            num_printed_reserved++;
-            num_printed++;
-
-            if (num_printed <= num_total)
-                data << ',';
-        }
-
-        /* And finally pad with empty slots (if there are any) 
-        while (num_printed <= num_total) {
-            num_printed++;
-
-            if (num_printed <= num_total)
-                data << ',';
-        }
-
-        minor::minorTrace("%s=%s\n", dataName, data.str());
-    }*/
 };
 
 /** Like a Queue but with a restricted interface and a setTail function

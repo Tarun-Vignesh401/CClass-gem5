@@ -163,10 +163,10 @@ CClassCPU::signalDrainDone()
 void
 CClassCPU::drainResume()
 {
-    /* When taking over from another cpu make sure lastStopped
-     * is reset since it might have not been defined previously
-     * and might lead to a stats corruption */
-  /*  pipeline->resetLastStopped();
+    // When taking over from another cpu make sure lastStopped
+    // is reset since it might have not been defined previously
+    // and might lead to a stats corruption.
+    pipeline->resetLastStopped();
 
     if (switchedOut()) {
         DPRINTF(Drain, "drainResume while switched out.  Ignoring\n");
@@ -204,8 +204,7 @@ CClassCPU::switchOut()
     assert(!switchedOut());
     BaseCPU::switchOut();
 
-    /* Check that the CPU is drained? */
-    /*
+    // Check that the CPU is drained?
     activityRecorder->reset();
 }
 

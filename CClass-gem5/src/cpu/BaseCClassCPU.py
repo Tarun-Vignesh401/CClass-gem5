@@ -225,6 +225,8 @@ class BaseCClassCPU(BaseCPU):
     executeAllowEarlyMemoryIssue = Param.Bool(0,"Allowing early issue of memory instructions")
     executeMemoryIssueLimit = Param.Unsigned(1, "Maximum amount of memory issues in one cycle")
     executeToMemoryForwardDelay = Param.Cycles(1, "Execute to memory forward delay")
+    memoryIssueLimit = Param.Unsigned(1, "No. of instructions the memory stage is capable of polling ")
+    writebackWidth = Param.Unsigned(1, "No. of instructions retired in one cycle")
     def addCheckerCpu(self):
         print("Checker not supported by CClassCPU")
         exit(1)

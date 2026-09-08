@@ -35,8 +35,8 @@ protected:
         DecodeThreadInfo(const DecodeThreadInfo& other) :
             inputIndex(other.inputIndex),
             lastStreamSeqNum(other.lastStreamSeqNum),
-            execSeqNum(other.execSeqNum),
             fetchSeqNum(other.fetchSeqNum),
+            execSeqNum(other.execSeqNum),
             expectedStreamSeqNum(other.expectedStreamSeqNum),
             predictionSeqNum(other.predictionSeqNum),
             havePC(other.havePC),
@@ -83,7 +83,7 @@ protected:
      /*struct DecodeStats : public statistics::Group
     {
         DecodeStats(CClassCPU *cpu);
-        /** Stats 
+        Stats
         statistics::Scalar totalInstructions;
         statistics::Scalar intInstructions;
         statistics::Scalar fpInstructions;

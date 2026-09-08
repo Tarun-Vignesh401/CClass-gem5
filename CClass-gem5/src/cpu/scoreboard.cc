@@ -26,43 +26,19 @@ Scoreboard::findIndex(const RegId& reg, Index &scoreboard_index)
         scoreboard_index = floatRegOffset + reg.index();
         ret = true;
         break;
-      case VecRegClass:
-        scoreboard_index = vecRegOffset + reg.index();
-        ret = true;
-        break;
-      case VecElemClass:
-        scoreboard_index = vecRegElemOffset + reg.index();
-        ret = true;
-        break;
-      case VecPredRegClass:
-        scoreboard_index = vecPredRegOffset + reg.index();
-        ret = true;
-        break;
-      case MatRegClass:
-        scoreboard_index = matRegOffset + reg.index();
-        ret = true;
-        break;
-      case CCRegClass:
-        scoreboard_index = ccRegOffset + reg.index();
-        ret = true;
-        break;
-      case MiscRegClass:
-          /* Don't bother with Misc registers */
-        ret = false;
-        break;
       case InvalidRegClass:
         ret = false;
         break;
       default:
         panic("Unknown register class: %d", reg.classValue());
     }
-
     return ret;
 }
-
+/* anything that is accessed via index, means that the depth of that entry is the same as
+* the number of architectural registers
+* When we mark destinations we already mark with the instseqnums*/
 void
-Scoreboard::markupInstDests(CClassDynInstPtr inst, Cycles retire_time,
-    ThreadContext *thread_context, bool mark_unpredictable)
+Scoreboard::markupInstDests(CClassDynInstPtr inst,ThreadContext *thread_context)
 {
     if (inst->isFault())
         return;
@@ -73,40 +49,29 @@ Scoreboard::markupInstDests(CClassDynInstPtr inst, Cycles retire_time,
     auto *isa = thread_context->getIsaPtr();
 
     /** Mark each destination register */
-    for (unsigned int dest_index = 0; dest_index < num_dests;
-        dest_index++)
+    for (unsigned int dest_index = 0; dest_index < num_dests; dest_index++)
     {
         RegId reg = staticInst->destRegIdx(dest_index).flatten(*isa);
         Index index;
 
         if (findIndex(reg, index)) {
-            if (mark_unpredictable)
-                numUnpredictableResults[index]++;
-
+            // to store the register index to clear in writeback
             inst->flatDestRegIdx[dest_index] = reg;
 
-            numResults[index]++;
-            returnCycle[index] = retire_time;
-            /* We should be able to rely on only being given accending
-             *  execSeqNums, but sanity check */
-            if (inst->id.execSeqNum > writingInst[index]) {
-                writingInst[index] = inst->id.execSeqNum;
-                fuIndices[index] = inst->fuIndex;
-            }
+            if (inst->id.execSeqNum > rename_id[index] || rename_id[index] == 0)
+                rename_id[index] = inst->id.execSeqNum;
 
-            DPRINTF(CClassCPU, "Marking up inst: %s"
-                " regIndex: %d final numResults: %d returnCycle: %d\n",
-                *inst, index, numResults[index], returnCycle[index]);
+            DPRINTF(CClassCPU, "Marking up inst: %s regIndex: %d\n", *inst, index);
         } else {
             /* Use an invalid ID to mark invalid/untracked dests */
+            /* I have to see in wb to confirm this ! */
             inst->flatDestRegIdx[dest_index] = RegId();
         }
     }
 }
 
 InstSeqNum
-Scoreboard::execSeqNumToWaitFor(CClassDynInstPtr inst,
-    ThreadContext *thread_context)
+Scoreboard::execSeqNumToWaitFor(CClassDynInstPtr inst,ThreadContext *thread_context)
 {
     InstSeqNum ret = 0;
 
@@ -123,8 +88,8 @@ Scoreboard::execSeqNumToWaitFor(CClassDynInstPtr inst,
         unsigned short int index;
 
         if (findIndex(reg, index)) {
-            if (writingInst[index] > ret)
-                ret = writingInst[index];
+            if (rename_id[index] > ret)/*id > 0 return id* else return 0*/
+                ret = rename_id[index];
         }
     }
 
@@ -135,10 +100,18 @@ Scoreboard::execSeqNumToWaitFor(CClassDynInstPtr inst,
 }
 
 void
-Scoreboard::clearInstDests(CClassDynInstPtr inst, bool clear_unpredictable)
+Scoreboard::clearScoreBoard(){
+/* Set all rename_id's to 0*/
+std::fill(rename_id.begin(), rename_id.end(), InstSeqNum{0});
+}
+
+void
+Scoreboard::clearInstDests(CClassDynInstPtr inst)
 {
-    if (inst->isFault())
+    if (inst->isFault()){
+        clearScoreBoard();
         return;
+    }
 
     StaticInstPtr staticInst = inst->staticInst;
     unsigned int num_dests = staticInst->numDestRegs();
@@ -151,31 +124,53 @@ Scoreboard::clearInstDests(CClassDynInstPtr inst, bool clear_unpredictable)
         Index index;
 
         if (findIndex(reg, index)) {
-            if (clear_unpredictable && numUnpredictableResults[index] != 0)
-                numUnpredictableResults[index] --;
-
-            numResults[index] --;
-
-            if (numResults[index] == 0) {
-                returnCycle[index] = Cycles(0);
-                writingInst[index] = 0;
-                fuIndices[index] = invalidFUIndex;
-            }
+                rename_id[index] = 0;
 
             DPRINTF(CClassCPU, "Clearing inst: %s"
-                " regIndex: %d final numResults: %d\n",
-                *inst, index, numResults[index]);
+                " regIndex: %d \n",
+                *inst, index);
         }
     }
 }
 
-bool
-Scoreboard::canInstIssue(CClassDynInstPtr inst,
-    const std::vector<Cycles> *src_reg_relative_latencies,
-    const std::vector<bool> *cant_forward_from_fu_indices,
-   //const std::vector<bool> *cant_forward_from_mem_stage,
-    Cycles now, ThreadContext *thread_context)
+
+/*Scoreboard owns a copy of memory and wb classes to check if the seqnumber is present in
+* the isb's or not*/
+Scoreboard::forwardresult 
+Scoreboard::checkExeIsbForId(ThreadID tid, InstSeqNum num)
+{   
+    forwardresult result = None;
+    if (!baseBuf[tid].empty() &&
+        baseBuf[tid].front().containsExecSeqNum(tid, num))
+        result = Int;
+
+    if (!mboxBuf[tid].empty() &&
+        mboxBuf[tid].front().containsExecSeqNum(tid, num))
+        result = None;
+
+    if (!fboxBuf[tid].empty() &&
+        fboxBuf[tid].front().containsExecSeqNum(tid, num))
+        result = None;
+    /* this shouldn't happen, mem results are unpredictable
+    *if (!memBuf[tid].empty() &&
+    *    memBuf[tid].front().containsExecSeqNum(tid, num))
+    *    return true;
+    */
+    return result;
+}
+
+Scoreboard::forwardresult
+Scoreboard::checkMemIsbForId(ThreadID tid, InstSeqNum num)
 {
+    return None;
+}
+
+bool
+Scoreboard::canInstIssue(CClassDynInstPtr inst,ThreadContext *thread_context)
+{   
+    /* for now I have to figure out to get the tid from thread_
+    * context*/
+    ThreadID tid = 0;
     /* Always allow fault to be issued */
     if (inst->isFault())
         return true;
@@ -186,62 +181,64 @@ Scoreboard::canInstIssue(CClassDynInstPtr inst,
     /* Default to saying you can issue */
     bool ret = true;
 
-    unsigned int num_relative_latencies = 0;
-    Cycles default_relative_latency = Cycles(0);
-
-    /* Where relative latencies are given, the default is the last
-     *  one as that allows the rel. lat. list to be shorted than the
-     *  number of src. regs */
-    if (src_reg_relative_latencies &&
-        src_reg_relative_latencies->size() != 0)
-    {
-        num_relative_latencies = src_reg_relative_latencies->size();
-        default_relative_latency = (*src_reg_relative_latencies)
-            [num_relative_latencies-1];
-    }
-
     auto *isa = thread_context->getIsaPtr();
 
     /* For each source register, find the latest result */
     unsigned int src_index = 0;
-    while (src_index < num_srcs && /* More registers */
-        ret /* Still possible */)
-    {
+
+
+    while (src_index < num_srcs && !ret)
+    {      
         RegId reg = staticInst->srcRegIdx(src_index).flatten(*isa);
         unsigned short int index;
-
+        
         if (findIndex(reg, index)) {
-            int src_reg_fu = fuIndices[index];
-            bool cant_forward = src_reg_fu != invalidFUIndex &&
-                cant_forward_from_fu_indices &&
-                src_reg_fu < cant_forward_from_fu_indices->size() &&
-                (*cant_forward_from_fu_indices)[src_reg_fu];
-
-            Cycles relative_latency = (cant_forward ? Cycles(0) :
-                (src_index >= num_relative_latencies ?
-                    default_relative_latency :
-                    (*src_reg_relative_latencies)[src_index]));
-
-            if (returnCycle[index] > (now + relative_latency) ||
-                numUnpredictableResults[index] != 0)
-            {
-                ret = false;
+            if(rename_id[index] == 0){
+                markupInstDests(inst ,thread_context);
+                ret = true;
+            }
+            else{
+                forwardresult can_forward = checkExeIsbForId(tid,rename_id[index]);
+                if(can_forward != None)
+                    ret = true;
+                else 
+                    ret = false;
             }
         }
         src_index++;
     }
-
-    if (debug::CClassTiming) {
-        if (ret && num_srcs > num_relative_latencies &&
-            num_relative_latencies != 0)
-        {
-            DPRINTF(CClassTiming, "Warning, inst: %s timing extra decode has"
-                " more src. regs: %d than relative latencies: %d\n",
-                staticInst->disassemble(0), num_srcs, num_relative_latencies);
-        }
-    }
+    /*for jal auipc lui etc.. where num_srcs = 0*/
+    /*if(num_srcs == 0 )
+        ret = true;
+    */
 
     return ret;
+}
+
+RegVal
+Scoreboard::forwardRegResult(ThreadID tid, InstSeqNum num, const RegId &reg){
+        
+    RegVal val = baseBuf[tid].front().forwardRegResult(tid, num, reg);
+
+    return val;
+
+}
+
+/* result id to be extended to support float to float forwards in the future
+* when we do float to float forwards we have to change the forwaded value to
+* a vector of bytes instead of RegVal type*/
+
+bool
+Scoreboard::lookForForwards(ThreadID tid, const RegId &reg, RegVal& forwarded_value){
+
+    Index index;
+    if( findIndex(reg,index) ){
+        forwardresult result_id = checkExeIsbForId(tid, rename_id[index]);
+        forwarded_value = forwardRegResult( tid, rename_id[index], reg);
+        return true;
+    }
+    return false;
+
 }
 
 /*void

@@ -14,12 +14,16 @@
 #ifndef __CPU_CCLASS_PIPE_DATA_HH__
 #define __CPU_CCLASS_PIPE_DATA_HH__
 
+#include <algorithm>
+#include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <vector>
 
 #include "cpu/cclass/buffers.hh"
 #include "cpu/cclass/dyn_inst.hh"
 #include "cpu/base.hh"
+#include "cpu/simple_thread.hh"
 
 #include "cpu/cclass/dyn_inst.hh"
 #include "arch/generic/mmu.hh"
@@ -36,6 +40,82 @@ class Execute;
 
 class ExecRequest;
 using ExecRequestPtr = std::shared_ptr<ExecRequest>;
+
+struct RegWrite
+{
+    RegId reg;
+    RegVal val = 0;
+    std::vector<uint8_t> bytes;
+    bool isBytes = false;
+
+    RegWrite() = default;
+
+    RegWrite(const RegId &reg_, RegVal val):
+        reg(reg_),
+        val(val)
+    {}
+
+    RegWrite(const RegId &reg_, size_t size, bool isBytes_) :
+        reg(reg_),
+        bytes(size),
+        isBytes(isBytes_)
+    { }
+};
+
+struct MiscWrite
+{
+    int miscReg = 0;
+    RegVal val = 0;
+};
+
+struct ExecResult
+{
+    CClassDynInstPtr inst;
+    std::vector<RegWrite> writes;
+    std::vector<MiscWrite> miscWrites;
+
+    ExecResult() = default;
+
+    void commit(SimpleThread &thread) const
+    {
+        for (const auto &write : writes) {
+            if (write.isBytes) {
+                thread.setReg(write.reg, write.bytes.data());
+            } else {
+                thread.setReg(write.reg, write.val);
+            }
+        }
+
+        for (const auto &write : miscWrites) {
+            thread.setMiscReg(write.miscReg, write.val);
+        }
+    }
+
+};
+
+class InstOrderData
+{
+  public:
+    std::vector<InstSeqNum> seqNums;
+
+    InstOrderData() = default;
+
+    explicit InstOrderData(const std::vector<InstSeqNum> &seq_nums) :
+        seqNums(seq_nums)
+    { }
+
+    unsigned int width() const { return seqNums.size(); }
+
+    void clear() { seqNums.clear(); }
+
+    void push_back(InstSeqNum seq_num) { seqNums.push_back(seq_num); }
+
+    static InstOrderData bubble() { return InstOrderData(); }
+
+    bool isBubble() const { return seqNums.empty(); }
+
+    void reportData(std::ostream &os) const;
+};
     
    //this enum is primarily for multithreading support.
   enum Fetch1State {
@@ -49,8 +129,8 @@ using ExecRequestPtr = std::shared_ptr<ExecRequest>;
     Fetch1ThreadInfo() = default;
 
     Fetch1ThreadInfo(const Fetch1ThreadInfo& other) :
-        bubbleFlag(other.bubbleFlag),
         state(other.state),
+        bubbleFlag(other.bubbleFlag),
         streamSeqNum(other.streamSeqNum),
         predictionSeqNum(other.predictionSeqNum),
         blocked(other.blocked),
@@ -197,9 +277,8 @@ class ForwardInstData /* : public ReportIF, public BubbleIF */
     ThreadID threadId;
 
   public:
-    explicit ForwardInstData(unsigned int width = 0,
+   explicit ForwardInstData(unsigned int width = 0,
                              ThreadID tid = InvalidThreadID);
-
     ForwardInstData(const ForwardInstData &src);
 
   public:
@@ -218,8 +297,42 @@ class ForwardInstData /* : public ReportIF, public BubbleIF */
     /** BubbleIF interface */
     bool isBubble() const;
 
+    bool containsExecSeqNum(ThreadID tid, InstSeqNum seq_num) const;
+
     /** ReportIF interface */
     //void reportData(std::ostream &os) const;
+};
+
+class ForwardResultData
+{
+  public:
+    ExecResult results[MAX_FORWARD_INSTS];
+    unsigned int numResults;
+    ThreadID threadId = 0;
+
+  public:
+    explicit ForwardResultData(unsigned int width = 0,
+                               ThreadID tid = InvalidThreadID);
+
+    ForwardResultData(const ExecResult &result_, ThreadID tid);
+
+    ForwardResultData(const ForwardResultData &src);
+
+    unsigned int width() const { return numResults; }
+
+    ForwardResultData &operator =(const ForwardResultData &src);
+
+    void resize(unsigned int width);
+
+    void bubbleFill();
+
+    static ForwardResultData bubble() { return ForwardResultData(); }
+
+    bool isBubble() const;
+
+    bool containsExecSeqNum(ThreadID tid, InstSeqNum seq_num) const;
+    
+    RegVal forwardRegResult(ThreadID tid, InstSeqNum seq_num, const RegId &reg) const;
 };
 
 class ExecRequest : public Packet::SenderState, public BaseMMU::Translation
@@ -271,16 +384,30 @@ class ExecRequest : public Packet::SenderState, public BaseMMU::Translation
 class ForwardMemData
 {
   public:
-    ExecRequestPtr request;
-    ThreadID threadId = InvalidThreadID;
+    ExecRequestPtr requests[MAX_FORWARD_INSTS];
+    /*make this private !! change in pushmemtolatch/pushinsttolatch */
+    unsigned int numRequests;
+    ThreadID threadId = 0;
 
-    ForwardMemData() = default;
-    ForwardMemData(ExecRequestPtr request_, ThreadID tid) :
-        request(request_), threadId(tid)
-    { }
+    explicit ForwardMemData(unsigned int width = 0,
+                            ThreadID tid = InvalidThreadID);
+
+    ForwardMemData(ExecRequestPtr request_, ThreadID tid);
+
+    ForwardMemData(const ForwardMemData &src);
+
+    unsigned int width() const { return numRequests; }
+
+    ForwardMemData &operator =(const ForwardMemData &src);
+
+    void resize(unsigned int width);
+
+    void bubbleFill();
 
     static ForwardMemData bubble() { return ForwardMemData(); }
-    bool isBubble() const { return !request; }
+    bool isBubble() const;
+
+    bool containsExecSeqNum(ThreadID tid, InstSeqNum seq_num) const;
 };
 
 

@@ -27,23 +27,40 @@ namespace cclass
 {
 
 class Execute;
+struct ExecResult;
+
 
 class ExecContext : public gem5::ExecContext
 {
   public:
     CClassCPU &cpu;
     SimpleThread &thread;
-    Execute &execute;
+    Execute *execute;
     CClassDynInstPtr inst;
+    ExecResult *result = nullptr;
 
-    ExecContext(CClassCPU &cpu_, SimpleThread &thread_, Execute &execute_,
-                CClassDynInstPtr inst_) :
+    ExecContext(CClassCPU &cpu_, SimpleThread &thread_, Execute* execute_,
+                CClassDynInstPtr inst_, ExecResult *result_ = nullptr) :
         cpu(cpu_),
         thread(thread_),
         execute(execute_),
-        inst(inst_)
+        inst(inst_),
+        result(result_)
     {
         // the pc state is set to pc of committing instruction , always!!
+        pcState(*inst->pc);
+        setPredicate(inst->readPredicate());
+        setMemAccPredicate(inst->readMemAccPredicate());
+    }
+
+    ExecContext(CClassCPU &cpu_, SimpleThread &thread_,
+                         CClassDynInstPtr inst_, ExecResult *result_) :
+    cpu(cpu_),
+    thread(thread_),
+    execute(nullptr),
+    inst(inst_),
+        result(result_)
+    {
         pcState(*inst->pc);
         setPredicate(inst->readPredicate());
         setMemAccPredicate(inst->readMemAccPredicate());
@@ -71,33 +88,19 @@ class ExecContext : public gem5::ExecContext
     Fault initiateMemAMO(Addr addr, unsigned int size, Request::Flags flags,
         AtomicOpFunctorPtr amo_op) override;
 
-    RegVal getRegOperand(const StaticInst *si, int idx) override
-    {
-        const RegId &reg = si->srcRegIdx(idx);
-        return reg.is(InvalidRegClass) ? 0 : thread.getReg(reg);
-    }
+    RegVal getRegOperand(const StaticInst *si, int idx) override;
 
-    void getRegOperand(const StaticInst *si, int idx, void *val) override
-    {
-        thread.getReg(si->srcRegIdx(idx), val);
-    }
+    void getRegOperand(const StaticInst *si, int idx, void *val) override;
 
-    void *getWritableRegOperand(const StaticInst *si, int idx) override
-    {
-        return thread.getWritableReg(si->destRegIdx(idx));
-    }
+    void *getWritableRegOperand(const StaticInst *si, int idx) override;
 
-    void setRegOperand(const StaticInst *si, int idx, RegVal val) override
-    {
-        const RegId &reg = si->destRegIdx(idx);
-        if (!reg.is(InvalidRegClass))
-            thread.setReg(reg, val);
-    }
+    void setRegOperand(const StaticInst *si, int idx, RegVal val) override;
 
-    void setRegOperand(const StaticInst *si, int idx, const void *val) override
-    {
-        thread.setReg(si->destRegIdx(idx), val);
-    }
+    void setRegOperand(const StaticInst *si, int idx, const void *val) override;
+
+    RegVal readMiscRegOperand(const StaticInst *si, int idx) override;
+
+    void setMiscRegOperand(const StaticInst *si, int idx, RegVal val) override;
 
     bool readPredicate() const override { return thread.readPredicate(); }
     void setPredicate(bool val) override { thread.setPredicate(val); }
@@ -137,25 +140,11 @@ class ExecContext : public gem5::ExecContext
     RegVal readMiscReg(int misc_reg) override
     { return thread.readMiscReg(misc_reg); }
 
-    void setMiscReg(int misc_reg, RegVal val) override
-    { thread.setMiscReg(misc_reg, val); }
-
-    RegVal readMiscRegOperand(const StaticInst *si, int idx) override
-    {
-        const RegId &reg = si->srcRegIdx(idx);
-        assert(reg.is(MiscRegClass));
-        return thread.readMiscReg(reg.index());
-    }
-
-    void setMiscRegOperand(const StaticInst *si, int idx, RegVal val) override
-    {
-        const RegId &reg = si->destRegIdx(idx);
-        assert(reg.is(MiscRegClass));
-        thread.setMiscReg(reg.index(), val);
-    }
+    void setMiscReg(int misc_reg, RegVal val) override;
 
     ThreadContext *tcBase() const override { return thread.getTC(); }
 
+    /* ARM specific stuff that we don't need but minor uses */
     unsigned int readStCondFailures() const override { return 0; }
     void setStCondFailures(unsigned int st_cond_failures) override {}
 

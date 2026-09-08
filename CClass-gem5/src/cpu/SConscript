@@ -15,25 +15,27 @@ if env['CONF']['BUILD_ISA']:
     Source('fetch1.cc')
     Source('fetch2.cc')
     Source('func_unit.cc')
+    Source('memory.cc')
 #    Source('lsq.cc')
     Source('pipe_data.cc')
     Source('pipeline.cc')
     Source('scoreboard.cc')
+    Source('writeback.cc')
 #    Source('stats.cc')
 
     DebugFlag('CClassCPU', 'CClass CPU-level events')
-    DebugFlag('CClassFetch', 'CClass fetch stage')
-#    DebugFlag('CClassExecute', 'CClass Execute stage')
-#    DebugFlag('CClassInterrupt', 'CClass interrupt handling')
-    DebugFlag('CClassMem', 'CClass memory accesses')
-#    DebugFlag('CClassScoreboard', 'CClass Execute register scoreboard')
+    DebugFlag('CClassFetch1', 'CClass fetch1 stage')
+    DebugFlag('CClassFetch2', 'CClass fetch2 stage')
+    DebugFlag('CClassDecode', 'CClass decode stage')
+
+
+    DebugFlag('CClassExecute', 'CClass execute stage')
+    DebugFlag('CClassMemory', 'CClass memory accesses')
+    DebugFlag('CClassWriteBack','CClass write back stage')
+    DebugFlag('CClassScoreboard', 'CClass Execute register scoreboard')
     DebugFlag('CClassTrace', 'CClassTrace cycle-by-cycle state trace')
     DebugFlag('CClassTiming', 'Extra timing for instructions')
-    DebugFlag('Debug', 'random debug flag for convenient dprintfs')
-
-#    CompoundFlag('CClass', [
-#        'CClassCPU', 'CClassExecute', 'CClassInterrupt', 'CClassMem',
-#        'CClassScoreboard'])
+#    DebugFlag('CClassInterrupt', 'CClass interrupt handling')
 
     # For backwards compatibility
     SimObject('CClassCPU.py', sim_objects=[], tags=['isa'])

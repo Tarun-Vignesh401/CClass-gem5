@@ -1,5 +1,5 @@
 #include "cpu/cclass/decode.hh"
-
+#include "debug/CClassDecode.hh"
 #include "arch/generic/decoder.hh"
 #include "base/logging.hh"
 #include "base/trace.hh"
@@ -21,15 +21,15 @@ Decode::Decode(const std::string &name,
     Latch<ForwardInstData>::Input out_,
     std::vector<InputBuffer<ForwardInstData>> &next_stage_input_buffer) :
     Named(name),
-    cpu(cpu_),
     branch(branch_),
-    out(out_),
     inp(inp_),
+    out(out_),
     nextStageReserve(next_stage_input_buffer),
+    cpu(cpu_),
     threadPriority(0),
-    processMoreThanOneInput(params.decodeCycleInput),
+    decodeInfo(params.numThreads),
     outputWidth(params.decodeInputWidth),
-    decodeInfo(params.numThreads)
+    processMoreThanOneInput(params.decodeCycleInput)
     //DecodeStats(cpu_)
     {
      if (outputWidth < 1)
@@ -95,7 +95,7 @@ if (!inp.outputWire->isBubble())
             thread.expectedStreamSeqNum == line_in->id.streamSeqNum &&
             thread.predictionSeqNum != line_in->id.predictionSeqNum)
         {
-            DPRINTF(CClassCPU, "Discarding line %s"
+            DPRINTF(CClassDecode, "Discarding line %s"
                 " due to predictionSeqNum mismatch (expected: %d)\n",
                 line_in->id, thread.predictionSeqNum);
 
@@ -103,7 +103,7 @@ if (!inp.outputWire->isBubble())
             decodeInfo[tid].havePC = false;
 
             if (processMoreThanOneInput) {
-                DPRINTF(CClassCPU, "Wrapping\n");
+                DPRINTF(CClassDecode, "Wrapping\n");
                 line_in = getInput(tid);
             } else {
                 line_in = NULL;
@@ -112,7 +112,7 @@ if (!inp.outputWire->isBubble())
     }
 
     ThreadID tid = getScheduledThread();
-    //DPRINTF(CClassCPU, "Scheduled Thread: %d\n", tid);
+    //DPRINTF(CClassDecode, "Scheduled Thread: %d\n", tid);
 
     assert(insts_out.isBubble());
 
@@ -155,7 +155,7 @@ if (!inp.outputWire->isBubble())
                     (line_in->pc->instAddr() /*& decoder->pcMask()*/) -
                     line_in->lineBaseAddr;
                 
-                DPRINTF(CClassCPU, "Setting new PC value: %s inputIndex: 0x%x"
+                DPRINTF(CClassDecode, "Setting new PC value: %s inputIndex: 0x%x"
                     " lineBaseAddr: 0x%x lineWidth: 0x%x\n",
                     *line_in->pc, decode_info.inputIndex, line_in->lineBaseAddr,
                     line_in->lineWidth);
@@ -172,7 +172,7 @@ if (!inp.outputWire->isBubble())
             if (discard_line) {
                 /* Rest of line was from an older prediction in the same
                  *  stream */
-                DPRINTF(CClassCPU, "Discarding line %s (from inputIndex: %d)"
+                DPRINTF(CClassDecode, "Discarding line %s (from inputIndex: %d)"
                     " due to predictionSeqNum mismatch (expected: %d)\n",
                     line_in->id, decode_info.inputIndex,
                     decode_info.predictionSeqNum);
@@ -194,7 +194,7 @@ if (!inp.outputWire->isBubble())
                  *  instructions to be generated. (Decodes makes no
                  *  immediate judgement about streamSeqNum) */
                 dyn_inst->fault = line_in->fault;
-                DPRINTF(CClassCPU, "Fault being passed output_index: "
+                DPRINTF(CClassDecode, "Fault being passed output_index: "
                     "%d: %s\n", output_index, dyn_inst->fault->name());
 
             } else {
@@ -204,7 +204,7 @@ if (!inp.outputWire->isBubble())
                 memcpy(decoder->moreBytesPtr(), line + wordOffset /*decode_info.inputIndex*/,
                         decoder->moreBytesSize());
                 
-                DPRINTF(CClassCPU,
+                DPRINTF(CClassDecode,
                 "DEC IN pc=%#lx lineBase=%#lx inputIndex=%u lineWidth=%u "
                 "addr=%#lx bytes=%02x %02x %02x %02x\n",
                 line_in->pc->instAddr(),
@@ -218,11 +218,11 @@ if (!inp.outputWire->isBubble())
                 if (!decoder->instReady()) {
                     decoder->moreBytes(*decode_info.pc,
                         line_in->lineBaseAddr + wordOffset);
-                    DPRINTF(CClassCPU, "Offering MachInst to decoder addr: 0x%x\n",
+                    DPRINTF(CClassDecode, "Offering MachInst to decoder addr: 0x%x\n",
                             line_in->lineBaseAddr + decode_info.inputIndex);
                 }
 
-                DPRINTF(CClassCPU, "Decoding the line at the tick: %llu\n",
+                DPRINTF(CClassDecode, "Decoding the line at the tick: %llu\n",
                         (unsigned long long)curTick());
 
                 /* Maybe make the above a loop to accomodate ISAs with
@@ -245,7 +245,7 @@ if (!inp.outputWire->isBubble())
                     dyn_inst->id.predictionSeqNum = decode_info.predictionSeqNum;
                     dyn_inst->id.execSeqNum = decode_info.execSeqNum;
                     set(dyn_inst->pc, decode_info.pc);
-                    DPRINTF(CClassCPU, "decoder inst %s\n", *dyn_inst);
+                    DPRINTF(CClassDecode, "decoder inst %s\n", *dyn_inst);
 
                     // Collect some basic inst class stats
                     /*
@@ -266,7 +266,7 @@ if (!inp.outputWire->isBubble())
                     stats.totalInstructions++;
                     cpu.fetchStats[tid]->numInsts++;*/
 
-                    DPRINTF(CClassCPU, "Instruction extracted from line %s"
+                    DPRINTF(CClassDecode, "Instruction extracted from line %s"
                         " lineWidth: %d output_index: %d inputIndex: %d"
                         " pc: %s inst: %s\n",
                         line_in->id,
@@ -280,7 +280,7 @@ if (!inp.outputWire->isBubble())
 
 
                 } else {
-                    DPRINTF(CClassCPU, "Inst not ready yet\n");
+                    DPRINTF(CClassDecode, "Inst not ready yet\n");
                 }
 
                 /* Step on the pointer into the line if there's no
@@ -326,7 +326,7 @@ if (!inp.outputWire->isBubble())
             /* Asked to discard line or there was a branch or fault */
             if (line_in->isFault() /* A line which is just a fault */)
             {
-                DPRINTF(CClassCPU, "Discarding all input on fault\n");
+                DPRINTF(CClassDecode, "Discarding all input on fault\n");
                 dumpAllInput(tid);
                 decode_info.havePC = false;
                 line_in = NULL;
@@ -346,7 +346,7 @@ if (!inp.outputWire->isBubble())
             }
 
             if (!line_in && processMoreThanOneInput) {
-                DPRINTF(CClassCPU, "Wrapping\n");
+                DPRINTF(CClassDecode, "Wrapping\n");
                 line_in = getInput(tid);
             }
         }
@@ -382,7 +382,7 @@ Decode::checkRedirect()
     if (branch_data.isBubble())
         return false;
 
-    DPRINTF(CClassCPU, "Decode saw branch data: %s\n", branch_data);
+    DPRINTF(CClassDecode, "Decode saw branch data: %s\n", branch_data);
 
     for (ThreadID tid = 0; tid < cpu.numThreads; tid++) {
         while (!inputBuffer[tid].empty())
@@ -395,7 +395,7 @@ Decode::checkRedirect()
 void
 Decode::dumpAllInput(ThreadID tid)
 {
-    DPRINTF(CClassCPU, "Dumping whole input buffer\n");
+    DPRINTF(CClassDecode, "Dumping whole input buffer\n");
     while (!inputBuffer[tid].empty())
         popInput(tid);
 

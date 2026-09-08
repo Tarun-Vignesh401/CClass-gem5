@@ -25,8 +25,6 @@ namespace gem5
 namespace cclass
 {
 
-/** Execute stage.  Everything apart from fetching and decoding instructions.
- *  The LSQ lives here too. */
 class Execute : public Named
 {
   protected:
@@ -37,19 +35,20 @@ class Execute : public Named
     Latch<BranchData>::Input out_fetch2;
     Latch<BranchData>::Input out_decode;
 
-    Latch<ForwardInstData>::Input out_BASE;
+    Latch<ForwardResultData>::Input out_BASE;
     Latch<ForwardMemData>::Input out_MEMORY;
-    Latch<ForwardInstData>::Input out_TRAP;
-    Latch<ForwardInstData>::Input out_MBOX;
-    Latch<ForwardInstData>::Input out_FBOX;
+    Latch<ForwardResultData>::Input out_TRAP;
+    Latch<ForwardResultData>::Input out_MBOX;
+    Latch<ForwardResultData>::Input out_FBOX;
 
-    /*
-    *std::vector<InputBuffer<ForwardMemData>> inputBuffer_MEMORY;
-    *std::vector<InputBuffer<ForwardInstData>> inputBuffer_BASE;
-    *std::vector<InputBuffer<ForwardInstData>> inputBuffer_TRAP;
-    *std::vector<InputBuffer<ForwardInstData>> inputBuffer_MBOX;
-    *std::vector<InputBuffer<ForwardInstData>> inputBuffer_FBOX;
-  */
+
+    std::vector<InputBuffer<ForwardResultData>> &nextStageReserve_BASE;
+    std::vector<InputBuffer<ForwardMemData>> &nextStageReserve_MEMORY;
+    std::vector<InputBuffer<ForwardResultData>> &nextStageReserve_TRAP;
+    std::vector<InputBuffer<ForwardResultData>> &nextStageReserve_MBOX;
+    std::vector<InputBuffer<ForwardResultData>> &nextStageReserve_FBOX;
+
+    Latch<InstOrderData>::Input inst_order;
 
     CClassCPU &cpu;
 
@@ -62,8 +61,6 @@ class Execute : public Named
     unsigned int InputBufferSize;
 
     bool allowEarlyMemIssue;
-
-    bool processMoreThanOneInput;
 
     CClassFUPool &fuDescriptions;
 
@@ -82,11 +79,10 @@ class Execute : public Named
      *  which pass the MinorDynInst::isNoCostInst test */
     unsigned int noCostFUIndex;
 
+    /* for multi threading we have a vector of scoreboards (not necessary here)*/
     std::vector<Scoreboard> scoreboard;
 
     std::vector<FUPipeline *> funcUnits;
-
-    std::vector<InstSeqNum> inst_order;
 
     // the execseqnum of the fence instructions
     //std::vector<InstSeqNum> lastMemBarrier;
@@ -106,15 +102,10 @@ class Execute : public Named
     };
 
     struct ExecuteThreadInfo
-    {
+    {     
+      
         ExecuteThreadInfo(unsigned int insts_committed) :
             inputIndex(0),
-            outputIndex(0),
-            baseOutputIndex(0),
-            memoryOutputIndex(0),
-            trapOutputIndex(0),
-            mboxOutputIndex(0),
-            fboxOutputIndex(0),
             instsBeingCommitted(insts_committed),
             streamSeqNum(InstId::firstStreamSeqNum),
             lastPredictionSeqNum(InstId::firstPredictionSeqNum),
@@ -123,12 +114,12 @@ class Execute : public Named
 
         ExecuteThreadInfo(const ExecuteThreadInfo& other) :
             inputIndex(other.inputIndex),
-            outputIndex(other.outputIndex),
             baseOutputIndex(other.baseOutputIndex),
             memoryOutputIndex(other.memoryOutputIndex),
             trapOutputIndex(other.trapOutputIndex),
             mboxOutputIndex(other.mboxOutputIndex),
             fboxOutputIndex(other.fboxOutputIndex),
+            inst_order_filled(other.inst_order_filled),
             instsBeingCommitted(other.instsBeingCommitted),
             streamSeqNum(other.streamSeqNum),
             lastPredictionSeqNum(other.lastPredictionSeqNum),
@@ -145,12 +136,13 @@ class Execute : public Named
          *  popInput when this equals getInput()->width() */
         unsigned int inputIndex;
 
-        unsigned int outputIndex;
         unsigned int baseOutputIndex;
         unsigned int memoryOutputIndex;
         unsigned int trapOutputIndex;
         unsigned int mboxOutputIndex;
         unsigned int fboxOutputIndex;
+        
+        bool inst_order_filled = false;
 
          /** Structure for reporting insts currently being processed/retired
          *  for MinorTrace */
@@ -162,10 +154,6 @@ class Execute : public Named
          *  to be another plan. */
         InstSeqNum streamSeqNum;
 
-        /** A prediction number for use where one isn't available from an
-         *  instruction.  This is harvested from committed instructions.
-         *  This isn't really needed as the streamSeqNum will change on
-         *  a branch, but it minimises disruption in stream identification */
         InstSeqNum lastPredictionSeqNum;
 
         /** State progression for draining NotDraining -> ... -> DrainAllInsts */
@@ -216,7 +204,7 @@ class Execute : public Named
 
     void FillSequence(const ForwardInstData *inst);
 
-    bool pushInstToLatch(ThreadID tid, CClassDynInstPtr inst);
+    bool pushInstToLatch(ThreadID tid, const ExecResult &result);
 
     bool pushMemReqToLatch(ThreadID tid, ExecRequestPtr request);
 
@@ -252,18 +240,23 @@ class Execute : public Named
 
     DcachePort dcachePort;
 
-    Execute(const std::string &name_,
-        CClassCPU &cpu_,
-        const BaseCClassCPUParams &params,
-        Latch<ForwardInstData>::Output inp_,
-        Latch<BranchData>::Input out_fetch1,
-        Latch<BranchData>::Input out_fetch2,
-        Latch<BranchData>::Input out_decode,
-        Latch<ForwardInstData>::Input out_BASE,
-        Latch<ForwardMemData>::Input out_MEMORY,
-        Latch<ForwardInstData>::Input out_TRAP,
-        Latch<ForwardInstData>::Input out_MBOX,
-        Latch<ForwardInstData>::Input out_FBOX);
+    Execute(const std::string &name_, CClassCPU &cpu_,
+                 const BaseCClassCPUParams &params,
+                 Latch<ForwardInstData>::Output inp_,
+                 Latch<BranchData>::Input out_fetch1,
+                 Latch<BranchData>::Input out_fetch2,
+                 Latch<BranchData>::Input out_decode,
+                 Latch<ForwardResultData>::Input out_BASE,
+                 Latch<ForwardMemData>::Input out_MEMORY,
+                 Latch<ForwardResultData>::Input out_TRAP,
+                 Latch<ForwardResultData>::Input out_MBOX,
+                 Latch<ForwardResultData>::Input out_FBOX,
+                 std::vector<InputBuffer<ForwardResultData>> &nextStageReserve_BASE,
+                 std::vector<InputBuffer<ForwardMemData>> &nextStageReserve_MEMORY,
+                 std::vector<InputBuffer<ForwardResultData>> &nextStageReserve_TRAP,
+                 std::vector<InputBuffer<ForwardResultData>> &nextStageReserve_MBOX,
+                 std::vector<InputBuffer<ForwardResultData>> &nextStageReserve_FBOX,
+                 Latch<InstOrderData>::Input inst_order_);
 
     ~Execute();
 
@@ -280,6 +273,8 @@ class Execute : public Named
     /** After thread suspension, has Execute been drained of in-flight
      *  instructions and memory accesses. */
     bool isDrained();
+
+    bool lookForForwards(ThreadID tid, const RegId& reg, RegVal& forwarded_val);
 
     //unsigned int drain();
 

@@ -13,7 +13,7 @@
 #include "cpu/cclass/pipe_data.hh"
 //#include "debug/Drain.hh"
 #include "arch/riscv/pcstate.hh"
-#include "debug/CClassFetch.hh"
+#include "debug/CClassFetch1.hh"
 #include "debug/CClassCPU.hh"
 
 
@@ -36,9 +36,9 @@ namespace gem5
             nextStageReserve(next_stage_input_buffer),
             inp(inp_),
             out(out_),
+            fetchLimit(params.fetch1FetchLimit),
             fetchInfo(params.numThreads),
-            threadPriority(0),
-            fetchLimit(params.fetch1FetchLimit)
+            threadPriority(0)
         {
         for (auto &info: fetchInfo)
             info.pc.reset(params.isa[0]->newPCState());
@@ -61,7 +61,7 @@ namespace gem5
             std::cout<< "latch is bubble !\n";
             return false;
         }
-        DPRINTF(CClassCPU, "Fetch1 saw branch data: %s\n", branch);
+        DPRINTF(CClassFetch1, "Fetch1 saw branch data: %s\n", branch);
 
         if (!branch.isStreamChange())
             return false;
@@ -112,7 +112,7 @@ namespace gem5
     thread.state = PCGenRunning;
     thread.wakeupGuard = true;
     thread.makeValid();
-    DPRINTF(CClassFetch, "[tid:%d]: Changing stream wakeup %s\n", tid, *thread.pc);
+    DPRINTF(CClassFetch1, "[tid:%d]: Changing stream wakeup %s\n", tid, *thread.pc);
     assert(thread_ctx != nullptr);
     cpu.wakeupOnEvent(Pipeline::Fetch1StageId);
     }
@@ -199,7 +199,7 @@ void Fetch1::evaluate(){
 
         }
         else{
-            //DPRINTF(CClassCPU,"PC generation halted\n");
+            //DPRINTF(CClassFetch1,"PC generation halted\n");
             fetchInfo[tid].state = PCGenHalted;
         }
 
@@ -215,8 +215,8 @@ void Fetch1::evaluate(){
 
         Fetch1ThreadInfo &thread = fetchInfo[execute_branch.threadId];
 
-        /* Are we changing stream?  Look to the Execute branches first, then
-         * to predicted changes of stream from Fetch2 
+        // Are we changing stream? Look to the Execute branches first, then
+        // to predicted changes of stream from Fetch2.
         if (execute_branch.isStreamChange()) {
             if (thread.state == PCGenHalted) {
                 DPRINTF(Fetch1, "Halted, ignoring branch: %s\n", execute_branch);
@@ -229,12 +229,12 @@ void Fetch1::evaluate(){
                     branchPred);
             }
 
-            /* The streamSeqNum tagging in request/response ->req should handle
-             *  discarding those requests when we get to them. 
+            // The streamSeqNum tagging in request/response ->req should handle
+            // discarding those requests when we get to them.
         } else if (thread.state != PCGenHalted && branchPred.isStreamChange()) {
-            /* Handle branch predictions by changing the instruction source
-             * if we're still processing the same stream (as set by streamSeqNum)
-             * as the one of the prediction.
+            // Handle branch predictions by changing the instruction source
+            // if we're still processing the same stream (as set by streamSeqNum)
+            // as the one of the prediction.
              
             if (branchPred.newStreamSeqNum != thread.streamSeqNum) {
                 DPRINTF(Fetch1, "Not changing stream on prediction: %s,"
@@ -245,7 +245,7 @@ void Fetch1::evaluate(){
             }
         }
     } else {
-        /* Fetch2 and Execute branches are for different threads 
+        // Fetch2 and Execute branches are for different threads.
         if (execute_branch.threadId != InvalidThreadID &&
             execute_branch.isStreamChange()) {
 
@@ -289,7 +289,7 @@ void Fetch1::processResponse(Fetch1ThreadInfo &out, Fetch1ThreadInfo &thread){
     out.makeValid();
     }    
     //std::cout << "Fetch1 processResponse called \n";
-    DPRINTF(CClassCPU,
+    DPRINTF(CClassFetch1,
     " Fetch 1 stage: processResponse: state=%d streamSeq=%llu predSeq=%llu "
     "blocked=%d fetchAddr=%#lx Bubble : %d\n",
     out.state,

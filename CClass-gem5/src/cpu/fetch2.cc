@@ -9,6 +9,7 @@
 #include "cpu/cclass/pipe_data.hh"
 #include "cpu/cclass/cpu.hh"
 #include "debug/CClassCPU.hh"
+#include "debug/CClassFetch2.hh"
 #include "cpu/cclass/pipeline.hh"
 
 
@@ -24,37 +25,37 @@ Fetch2::Fetch2(const std::string &name_, CClassCPU &cpu_,
     std::vector<InputBuffer<ForwardLineData>> &next_stage_input_buffer) :
     Named(name_),
     cpu(cpu_),
-    branch(branch_),
     in_thread(in_thread_),
+    branch(branch_),
     out(out_),
     nextStageReserve(next_stage_input_buffer),
-    lineSnap(params.fetch2LineSnapWidth),
-    maxLineWidth(params.fetch2LineWidth),
     fetchLimit(params.fetch1FetchLimit),
-    fetch2_thread(nullptr),
+    maxLineWidth(params.fetch2LineWidth),
+    lineSnap(params.fetch2LineSnapWidth),
+    numFetchesInITLB(0),
+    numFetchesInMemorySystem(0),
+    lineSeqNum(InstId::firstLineSeqNum),
     threadPriority(0),
+    streamSeqNum(params.numThreads, InstId::firstStreamSeqNum),
+    predictionSeqNum(params.numThreads, InstId::firstPredictionSeqNum),
+    fetch2_thread(nullptr),
     fetchState(FetchWaiting),
     requests(name_ + ".requests", "lines", params.fetch1FetchLimit),
     transfers(name_ + ".transfers", "lines", params.fetch1FetchLimit),
     icacheState(IcacheRunning),
-    lineSeqNum(InstId::firstLineSeqNum),
-    streamSeqNum(params.numThreads, InstId::firstStreamSeqNum),
-    predictionSeqNum(params.numThreads, InstId::firstPredictionSeqNum),
-    numFetchesInMemorySystem(0),
-    numFetchesInITLB(0),
     icachePort(cpu.name() + ".icache_port", *this, cpu)
 
 {    
 
     if (lineSnap == 0) {
         lineSnap = cpu.cacheLineSize();
-        DPRINTF(CClassCPU,"lineSnap set to cache line size of: %d\n",
+        DPRINTF(CClassFetch2,"lineSnap set to cache line size of: %d\n",
             lineSnap);
     }
 
     if (maxLineWidth == 0) {
         maxLineWidth = cpu.cacheLineSize();
-        DPRINTF(CClassCPU, "maxLineWidth set to cache line size of: %d\n",
+        DPRINTF(CClassFetch2, "maxLineWidth set to cache line size of: %d\n",
             maxLineWidth);
     }
 
@@ -68,14 +69,14 @@ Fetch2::Fetch2(const std::string &name_, CClassCPU &cpu_,
 
 void Fetch2::finaldebugprint(ThreadID tid,const Fetch1ThreadInfo* thread)
 { 
-   DPRINTF(CClassCPU, "State: %d,streamSeqNum: %d, predictionSeqNum: %d,blocked: %d,FetchAddr: %#x, bubble:%d\n",
+   DPRINTF(CClassFetch2, "State: %d,streamSeqNum: %d, predictionSeqNum: %d,blocked: %d,FetchAddr: %#x, bubble:%d\n",
         thread->state,thread->streamSeqNum,thread->predictionSeqNum,thread->blocked,thread->FetchAddr,thread->isBubble());
      if (thread->pc) {
-        DPRINTF(CClassCPU, "PC: %s\n", thread->pc->instAddr());
+        DPRINTF(CClassFetch2, "PC: %s\n", thread->pc->instAddr());
     }
     // latch output
     Fetch1ThreadInfo thread_info = *in_thread.outputWire;
-    DPRINTF(CClassCPU,"state: %d, streamSeqNum: %d, predictionSeqNum: %d\n",thread_info.state,
+    DPRINTF(CClassFetch2,"state: %d, streamSeqNum: %d, predictionSeqNum: %d\n",thread_info.state,
     thread_info.streamSeqNum,thread_info.predictionSeqNum);
 }
 
@@ -96,7 +97,7 @@ Fetch2::fetchLine(ThreadID tid,const Fetch1ThreadInfo* thread)
     FetchRequestPtr request = new FetchRequest(*this, request_id,
             thread->FetchAddr);
 
-    //DPRINTF(CClassCPU, "Inserting fetch into the fetch queue "
+    //DPRINTF(CClassFetch2, "Inserting fetch into the fetch queue "
     //    "%s addr: 0x%x pc: %s line_offset: %d request_size: %d\n",
       //  /*request_id*/ aligned_pc, thread.FetchAddr, line_offset, request_size);
 //Instid op defn was missing this was the problem
@@ -106,7 +107,7 @@ Fetch2::fetchLine(ThreadID tid,const Fetch1ThreadInfo* thread)
         /* I've no idea why we need the PC, but give it */
         thread->FetchAddr);
 
-    DPRINTF(CClassCPU, "Submitting ITLB request,Size of request : %d\n" ,request_size);
+    DPRINTF(CClassFetch2, "Submitting ITLB request,Size of request : %d\n" ,request_size);
     numFetchesInITLB++;
 
     request->state = FetchRequest::InTranslation;
@@ -163,7 +164,7 @@ Fetch2::handleTLBResponse(FetchRequestPtr response)
     numFetchesInITLB--;
 
     if (response->fault != NoFault) {
-        DPRINTF(CClassCPU, "Fault in address ITLB translation: %s, "
+        DPRINTF(CClassFetch2, "Fault in address ITLB translation: %s, "
             "paddr: 0x%x, vaddr: 0x%x\n",
             response->fault->name(),
             (response->request->hasPaddr() ?
@@ -173,7 +174,7 @@ Fetch2::handleTLBResponse(FetchRequestPtr response)
        // if (debug::MinorTrace)
            // minorTraceResponseLine(name(), response);
     } else {
-        DPRINTF(CClassCPU, "Got ITLB response\n");
+        DPRINTF(CClassFetch2, "Got ITLB response\n");
     }
 
     response->state = FetchRequest::Translated;
@@ -192,13 +193,13 @@ void
 Fetch2::tryToSendToTransfers(FetchRequestPtr request)
 {
     if (!requests.empty() && requests.front() != request) {
-        DPRINTF(CClassCPU, "Fetch not at front of requests queue, can't"
+        DPRINTF(CClassFetch2, "Fetch not at front of requests queue, can't"
             " issue to memory\n");
         return;
     }
 
     if (request->state == FetchRequest::InTranslation) {
-        DPRINTF(CClassCPU, "Fetch still in translation, not issuing to"
+        DPRINTF(CClassFetch2, "Fetch still in translation, not issuing to"
             " memory\n");
         return;
     }
@@ -223,7 +224,7 @@ Fetch2::tryToSendToTransfers(FetchRequestPtr request)
         if (tryToSend(request))
             Fetch2::moveFromRequestsToTransfers(request);
     } else {
-        DPRINTF(CClassCPU, "Not advancing line fetch\n");
+        DPRINTF(CClassFetch2, "Not advancing line fetch\n");
     }
 }
 
@@ -250,12 +251,12 @@ Fetch2::stepQueues()
         }
         break;
       case IcacheNeedsRetry:
-      DPRINTF(CClassCPU,"Needs a retry to Icache!\n");
+      DPRINTF(CClassFetch2,"Needs a retry to Icache!\n");
         break;
     }
 
     if (icacheState != old_icache_state) {
-        DPRINTF(CClassCPU, "Step in state %s moving to state %s\n",
+        DPRINTF(CClassFetch2, "Step in state %s moving to state %s\n",
             old_icache_state, icacheState);
     }
 }
@@ -280,7 +281,7 @@ Fetch2::numInFlightFetches()
 bool
 Fetch2::recvTimingResp(PacketPtr response)
 {
-    DPRINTF(CClassCPU, "recvTimingResp %d\n", numFetchesInMemorySystem);
+    DPRINTF(CClassFetch2, "recvTimingResp %d\n", numFetchesInMemorySystem);
 
     /* Only push the response if we didn't change stream?  No,  all responses
      *  should hit the responses queue.  It's the job of 'step' to throw them
@@ -296,7 +297,7 @@ Fetch2::recvTimingResp(PacketPtr response)
     fetch_request->state = FetchRequest::Complete;
 
     if (response->isError()) {
-        DPRINTF(CClassCPU, "Received error response packet: %s\n",
+        DPRINTF(CClassFetch2, "Received error response packet: %s\n",
             fetch_request->id);
     }
 
@@ -311,7 +312,7 @@ Fetch2::recvTimingResp(PacketPtr response)
 void
 Fetch2::recvReqRetry()
 {
-    DPRINTF(CClassCPU, "recvRetry\n");
+    DPRINTF(CClassFetch2, "recvRetry\n");
     assert(icacheState == IcacheNeedsRetry);
     assert(!requests.empty());
 
@@ -348,7 +349,7 @@ Fetch2::processResponse(Fetch2::FetchRequestPtr response,
         /* Should probably try to flush the queues as well, but we
          * can't be sure that this fault will actually reach Execute, and we
          * can't (currently) selectively remove this stream from the queues */
-        DPRINTF(CClassCPU, "Stopping line fetch because of fault: %s\n",
+        DPRINTF(CClassFetch2, "Stopping line fetch because of fault: %s\n",
             response->fault->name());
         //thread->state = Fetch1State::PCWaitingForChange;
         line.setFault(response->fault);
@@ -378,16 +379,16 @@ Fetch2::evaluate(){
 
     if (!in_thread.outputWire->isBubble()){
         inputBuffer[fetch_tid].setTail(*in_thread.outputWire);
-        DPRINTF(CClassCPU,"you have set to the inputBuffer !!\n");
+        DPRINTF(CClassFetch2,"you have set to the inputBuffer !!\n");
     }
 if(fetch2_thread)
 {   
-    //DPRINTF(CClassCPU, "fetch2 is evaluating thread %d\n", fetch_tid);
+    //DPRINTF(CClassFetch2, "fetch2 is evaluating thread %d\n", fetch_tid);
 
     ForwardLineData &line_out = *out.inputWire;
   
     if (fetch_tid != InvalidThreadID) {
-            //DPRINTF(CClassCPU, "Fetching from thread %d\n", fetch_tid);
+            //DPRINTF(CClassFetch2, "Fetching from thread %d\n", fetch_tid);
             if(numInFlightFetches() < fetchLimit && (fetchState == FetchWaiting)){
             /* Generate fetch to selected thread */
             finaldebugprint(fetch_tid,fetch2_thread);
@@ -407,12 +408,12 @@ if(fetch2_thread)
         transfers.front()->isComplete())
     {
         Fetch2::FetchRequestPtr response = transfers.front();
-        DPRINTF(CClassCPU,"we are here stepping queues\n");
+        DPRINTF(CClassFetch2,"we are here stepping queues\n");
 
         if (response->isDiscardable()) {
             nextStageReserve[response->id.threadId].freeReservation();
 
-            DPRINTF(CClassCPU, "Discarding translated fetch as it's for"
+            DPRINTF(CClassFetch2, "Discarding translated fetch as it's for"
                 " an old stream\n");
 
             /* Wake up next cycle just in case there was some other
@@ -421,7 +422,7 @@ if(fetch2_thread)
 
         } else {
 
-            DPRINTF(CClassCPU, "Processing fetched line: %d\n"
+            DPRINTF(CClassFetch2, "Processing fetched line: %d\n"
                ,response->id);
 
             processResponse(response,line_out,fetch2_thread);
@@ -435,7 +436,7 @@ if(fetch2_thread)
       
 }//if(thread)...
 if (!in_thread.outputWire->isBubble()){
-        DPRINTF(CClassCPU,"you have pushed to the inputBuffer !!\n");
+        DPRINTF(CClassFetch2,"you have pushed to the inputBuffer !!\n");
         inputBuffer[fetch_tid].pushTail();
         
 }
@@ -457,13 +458,13 @@ Fetch2::tryToSend(FetchRequestPtr request)
 
         ret = true;
 
-        DPRINTF(CClassCPU, "Issued fetch request to memory: %s\n",
+        DPRINTF(CClassFetch2, "Issued fetch request to memory: %s\n",
             request->id);
     } else {
         /* Needs to be resent, wait for that */
         icacheState = IcacheNeedsRetry;
 
-        DPRINTF(CClassCPU, "Line fetch needs to retry: %s\n",
+        DPRINTF(CClassFetch2, "Line fetch needs to retry: %s\n",
             request->id);
     }
 
@@ -494,7 +495,7 @@ Fetch2::popInput(ThreadID tid)
     if (!inputBuffer[tid].empty()) {
         inputBuffer[tid].pop();
     }
-    DPRINTF(CClassCPU,"have popped from isb\n");
+    DPRINTF(CClassFetch2,"have popped from isb\n");
 
     //fetchInfo[tid].inputIndex = 0;
 }
@@ -507,7 +508,7 @@ Fetch2::checkRedirect()
     if (branch_data.isBubble())
         return false;
 
-    DPRINTF(CClassCPU, "Fetch2 saw branch data: %s\n", branch_data);
+    DPRINTF(CClassFetch2, "Fetch2 saw branch data: %s\n", branch_data);
 
     if (!branch_data.isStreamChange())
         return false;

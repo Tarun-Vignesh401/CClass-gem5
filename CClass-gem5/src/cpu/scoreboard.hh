@@ -14,6 +14,7 @@
 #include "base/types.hh"
 #include "cpu/cclass/cpu.hh"
 #include "cpu/cclass/dyn_inst.hh"
+#include "cpu/cclass/pipe_data.hh"
 #include "cpu/cclass/trace.hh"
 #include "cpu/reg_class.hh"
 
@@ -31,13 +32,17 @@ class Scoreboard : public Named
   public:
     const BaseISA::RegClasses regClasses;
 
+    /* for now no float to float forwarding */
+    typedef enum{
+        Int,
+        None
+    } forwardresult;
+
     const unsigned intRegOffset;
     const unsigned floatRegOffset;
-    const unsigned ccRegOffset;
-    const unsigned vecRegOffset;
-    const unsigned vecRegElemOffset;
-    const unsigned vecPredRegOffset;
-    const unsigned matRegOffset;
+    //const unsigned vecRegOffset;
+    //const unsigned vecRegElemOffset;
+    //const unsigned vecPredRegOffset;
 
     /** The number of registers in the Scoreboard.  These
      *  are just the integer, CC and float registers packed
@@ -52,46 +57,41 @@ class Scoreboard : public Named
 
     /** Count of the number of in-flight instructions that
      *  have results for each register */
-    std::vector<Index> numResults;
+    //std::vector<Index> numResults;
 
     /** Count of the number of results which can't be predicted */
-    std::vector<Index> numUnpredictableResults;
+    //std::vector<Index> numUnpredictableResults;
 
     /** Index of the FU generating this result */
-    std::vector<int> fuIndices;
-    static constexpr int invalidFUIndex = -1;
+    //std::vector<int> fuIndices;
+    //static constexpr int invalidFUIndex = -1;
 
     /** The estimated cycle number that the result will be presented.
      *  This can be offset from to allow forwarding to be simulated as
      *  long as instruction completion is *strictly* in order with
      *  respect to instructions with unpredictable result timing */
-    std::vector<Cycles> returnCycle;
+    //std::vector<Cycles> returnCycle;
 
     /** The execute sequence number of the most recent inst to generate this
      *  register value */
-    std::vector<InstSeqNum> writingInst;
+    std::vector<InstSeqNum> rename_id;
 
   public:
     Scoreboard(const std::string &name,
-            const BaseISA::RegClasses& reg_classes) :
-        Named(name),
-        regClasses(reg_classes),
-        intRegOffset(0),
-        floatRegOffset(intRegOffset + reg_classes.at(IntRegClass)->numRegs()),
-        ccRegOffset(floatRegOffset + reg_classes.at(FloatRegClass)->numRegs()),
-        vecRegOffset(ccRegOffset + reg_classes.at(CCRegClass)->numRegs()),
-        vecRegElemOffset(vecRegOffset + reg_classes.at(VecRegClass)->numRegs()),
-        vecPredRegOffset(vecRegElemOffset +
-                reg_classes.at(VecElemClass)->numRegs()),
-        matRegOffset(vecPredRegOffset +
-                reg_classes.at(VecPredRegClass)->numRegs()),
-        numRegs(matRegOffset + reg_classes.at(MatRegClass)->numRegs()),
-        numResults(numRegs, 0),
-        numUnpredictableResults(numRegs, 0),
-        fuIndices(numRegs, invalidFUIndex),
-        returnCycle(numRegs, Cycles(0)),
-        writingInst(numRegs, 0)
-    { }
+    const BaseISA::RegClasses &reg_classes,
+    const std::vector<InputBuffer<ForwardResultData>> &base_buf,
+    const std::vector<InputBuffer<ForwardResultData>> &mbox_buf,
+    const std::vector<InputBuffer<ForwardResultData>> &fbox_buf) :
+    Named(name),
+    regClasses(reg_classes),
+    intRegOffset(0),
+    floatRegOffset(intRegOffset + reg_classes.at(IntRegClass)->numRegs()),
+    numRegs(floatRegOffset + reg_classes.at(FloatRegClass)->numRegs()),
+    rename_id(numRegs, 0),
+    baseBuf(base_buf),
+    mboxBuf(mbox_buf),
+    fboxBuf(fbox_buf)
+{ }
 
   public:
     /** Sets scoreboard_index to the index into numResults of the
@@ -99,35 +99,43 @@ class Scoreboard : public Named
      *  is in the scoreboard and false if it isn't */
     bool findIndex(const RegId& reg, Index &scoreboard_index);
 
-    bool isBranchForward();
-
     /** Mark up an instruction's effects by incrementing
      *  numResults counts.  If mark_unpredictable is true, the inst's
      *  destination registers are marked as being unpredictable without
      *  an estimated retire time */
-    void markupInstDests(CClassDynInstPtr inst, Cycles retire_time,
-        ThreadContext *thread_context, bool mark_unpredictable);
+    void markupInstDests(CClassDynInstPtr inst, ThreadContext *thread_ctx);
 
     /** Clear down the dependencies for this instruction.  clear_unpredictable
      *  must match mark_unpredictable for the same inst. */
-    void clearInstDests(CClassDynInstPtr inst, bool clear_unpredictable);
+    void clearInstDests(CClassDynInstPtr inst);
+
+    void clearScoreBoard();
 
     /** Returns the exec sequence number of the most recent inst on
      *  which the given inst depends.  Useful for determining which
      *  inst must actually be committed before a dependent inst
      *  can call initiateAcc */
-    InstSeqNum execSeqNumToWaitFor(CClassDynInstPtr inst,
-        ThreadContext *thread_context);
+    InstSeqNum execSeqNumToWaitFor(CClassDynInstPtr inst, ThreadContext *thread_context);
 
     /** Can this instruction be issued.  Are any of its source registers
      *  due to be written by other marked-up instructions in flight */
-    bool canInstIssue(CClassDynInstPtr inst,
-        const std::vector<Cycles> *src_reg_relative_latencies,
-        const std::vector<bool> *cant_forward_from_fu_indices,
-        Cycles now, ThreadContext *thread_context);
+    bool canInstIssue(CClassDynInstPtr inst, ThreadContext *thread_context);
 
-    /** CClassTraceIF interface */
+    forwardresult checkExeIsbForId(ThreadID tid, InstSeqNum num);
+
+    forwardresult checkMemIsbForId(ThreadID tid, InstSeqNum num);
+
+    RegVal forwardRegResult(ThreadID tid, InstSeqNum num, const RegId &reg);
+      
+    bool lookForForwards(ThreadID tid, const RegId &reg, RegVal& forwarded_value);
+
+    /** CClassTraceIF interface  have to figure out*/
     //void minorTrace() const;
+
+    private:
+    const std::vector<InputBuffer<ForwardResultData>> &baseBuf;
+    const std::vector<InputBuffer<ForwardResultData>> &mboxBuf;
+    const std::vector<InputBuffer<ForwardResultData>> &fboxBuf;
 };
 
 } // namespace cclass

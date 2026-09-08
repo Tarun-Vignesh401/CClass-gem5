@@ -31,6 +31,7 @@
 #include "debug/Drain.hh"
 #include "debug/ExecFaulting.hh"
 #include "debug/CClassCPU.hh"
+#include "debug/CClassExecute.hh"
 #include"cpu/cclass/pipe_data.hh"
 //#include "debug/CClassTrace.hh"
 #include "debug/PCEvent.hh"
@@ -39,19 +40,23 @@ namespace gem5{
 
 namespace cclass{
 
-
-
 Execute::Execute(const std::string &name_, CClassCPU &cpu_,
                  const BaseCClassCPUParams &params,
                  Latch<ForwardInstData>::Output inp_, 
                  Latch<BranchData>::Input out_fetch1,
                  Latch<BranchData>::Input out_fetch2,
                  Latch<BranchData>::Input out_decode,
-                 Latch<ForwardInstData>::Input out_BASE,
+                 Latch<ForwardResultData>::Input out_BASE,
                  Latch<ForwardMemData>::Input out_MEMORY,
-                 Latch<ForwardInstData>::Input out_TRAP,
-                 Latch<ForwardInstData>::Input out_MBOX,
-                 Latch<ForwardInstData>::Input out_FBOX):
+                 Latch<ForwardResultData>::Input out_TRAP,
+                 Latch<ForwardResultData>::Input out_MBOX,
+                 Latch<ForwardResultData>::Input out_FBOX,
+                 std::vector<InputBuffer<ForwardResultData>> &nextStageReserve_BASE,
+                 std::vector<InputBuffer<ForwardMemData>> &nextStageReserve_MEMORY,
+                 std::vector<InputBuffer<ForwardResultData>> &nextStageReserve_TRAP,
+                 std::vector<InputBuffer<ForwardResultData>> &nextStageReserve_MBOX,
+                 std::vector<InputBuffer<ForwardResultData>> &nextStageReserve_FBOX,
+                 Latch<InstOrderData>::Input inst_order_):
       Named(name_),
       inp(inp_),
       out_fetch1(out_fetch1),
@@ -62,32 +67,25 @@ Execute::Execute(const std::string &name_, CClassCPU &cpu_,
       out_TRAP(out_TRAP),
       out_MBOX(out_MBOX),
       out_FBOX(out_FBOX),
+      nextStageReserve_BASE(nextStageReserve_BASE),
+      nextStageReserve_MEMORY(nextStageReserve_MEMORY),
+      nextStageReserve_TRAP(nextStageReserve_TRAP),
+      nextStageReserve_MBOX(nextStageReserve_MBOX),
+      nextStageReserve_FBOX(nextStageReserve_FBOX),
+      inst_order(inst_order_),
       cpu(cpu_),
       stalled(false),
-      issueLimit(params.executeIssueLimit),
       memoryIssueLimit(params.executeMemoryIssueLimit),
+      issueLimit(params.executeIssueLimit),
       InputBufferSize(params.executeInputBufferLimit),
+      allowEarlyMemIssue(params.executeAllowEarlyMemoryIssue),
       fuDescriptions(*params.executeFuncUnits),
       numFuncUnits(fuDescriptions.funcUnits.size()),
-      allowEarlyMemIssue(params.executeAllowEarlyMemoryIssue),
       noCostFUIndex(fuDescriptions.funcUnits.size() + 1),
       executeInfo(params.numThreads,ExecuteThreadInfo(params.executeIssueLimit)),
       dcachePort(cpu.name() + ".dcache_port", *this, cpu)
       //issueStats(&cpu_)
 {
- 
-
-for (ThreadID tid = 0; tid < params.numThreads; tid++) {
-        std::string tid_str = std::to_string(tid);
-
-        /* Input Buffers */
-        inputBuffer.push_back(
-            InputBuffer<ForwardInstData>(
-                name_ + ".inputBuffer" + tid_str, "insts",
-                params.executeInputBufferSize));
-}
-
-
   /* This should be large enough to count all the in-FU instructions
      *  which need to be accounted for in the inFlightInsts
      *  queue */
@@ -144,7 +142,10 @@ for (ThreadID tid = 0; tid < params.numThreads; tid++) {
         const auto &regClasses = cpu.threads[tid]->getIsaPtr()->regClasses();
 
         /* Scoreboards */
-        scoreboard.emplace_back(name_ + ".scoreboard" + tid_str, regClasses);
+        scoreboard.emplace_back(name_ + ".scoreboard" + tid_str, regClasses,
+            nextStageReserve_BASE,
+            nextStageReserve_MBOX,
+            nextStageReserve_FBOX);
 
         /* In-flight instruction records */
         executeInfo[tid].inFlightInsts.reserve(total_slots);
@@ -165,26 +166,17 @@ Execute::popInput(ThreadID tid)
 
 }
 
-void Execute::evaluate(){
+void 
+Execute::evaluate(){
 
     
     if (!inp.outputWire->isBubble())
         inputBuffer[inp.outputWire->threadId].setTail(*inp.outputWire);
 
+
     BranchData &branch_fetch1 = *out_fetch1.inputWire;
     BranchData &branch_fetch2 = *out_fetch2.inputWire;
     BranchData &branch_decode = *out_decode.inputWire;
-
-    //std::vector<ForwardingSource> mem_exe_forwards;
-    //std::vector<ForwardingSource> mem_wb_forwards;
-
-    //static unsigned int output_index = 0;
-
-    unsigned int num_issued = 0;
-    
-    bool becoming_stalled = true;
-
-    bool can_issue_next = false;
 
     // for each cycle one issuing thread...
 
@@ -218,14 +210,16 @@ void Execute::evaluate(){
             }
         }
         else {
-            //DPRINTF(CClassCPU,"Trying to Issuing instruction for tid:%d\n",issue_tid);
-            num_issued = issue(issue_tid); 
+            //DPRINTF(CClassExecute,"Trying to Issuing instruction for tid:%d\n",issue_tid);
+            //num_issued = issue(issue_tid);
             fu->advance();
         }
         // for ticking again..
       
     }
     }// for loop ends..
+    issue(issue_tid);
+
     std::vector<CClassDynInstPtr> next_issuable_insts;
 
     for (ThreadID tid = 0; tid < cpu.numThreads; tid++) {
@@ -234,31 +228,24 @@ void Execute::evaluate(){
         if (getInput(tid)) {
             unsigned int input_index = executeInfo[tid].inputIndex;
             CClassDynInstPtr inst = getInput(tid)->insts[input_index];
-            if (inst->isFault()) {
-                can_issue_next = true;
-            } else if (!inst->isBubble()) {
+            if (!inst->isFault() && !inst->isBubble()) {
                 next_issuable_insts.push_back(inst);
             }
         }
     }
 
     trytoPush(issue_tid);
-    displayseqnums();        
+    //displayseqnums();
 
 
     // evaluating if we have to tick again or not..
     for (int j = 0; j< numFuncUnits; j++){
         FUPipeline *fu_pipe = funcUnits[j];
         // this is for if the execute stage should be awake the next cycle
-        if (fu_pipe->occupancy !=0 && !fu_pipe->stalled)
-            becoming_stalled = false;
 
         for (auto inst : next_issuable_insts) {
             if (!fu_pipe->stalled && fu_pipe->provides(inst->staticInst->opClass()) &&
-                scoreboard[inst->id.threadId].canInstIssue(inst,
-                    NULL, NULL, cpu.curCycle() + Cycles(1),
-                    cpu.getContext(inst->id.threadId))) {
-                can_issue_next = true;
+                scoreboard[inst->id.threadId].canInstIssue(inst, cpu.getContext(inst->id.threadId))){
                 break;
             }
         }
@@ -267,7 +254,7 @@ void Execute::evaluate(){
     /*bool need_to_tick = num_issued != 0 || !becoming_stalled || can_issue_next;
 
     if(!need_to_tick){
-        DPRINTF(CClassCPU,"Next Cycle might be skippable!! \n");
+        DPRINTF(CClassExecute,"Next Cycle might be skippable!! \n");
     }
     else*/ 
         cpu.wakeupOnEvent(Pipeline::ExecuteStageId);
@@ -290,22 +277,34 @@ Execute::getInput(ThreadID tid){
         return NULL;
     } 
 }
-
+/* fill the execseqnums for each forwardinstdata from the decode stage 
+* maybe change it to somewhere else, maybe after popInput? no need to repeat this.*/
 void
 Execute::FillSequence(const ForwardInstData *inst){
+    InstOrderData &order = *inst_order.inputWire;
 
-for(unsigned int i = 0; i < inst->width() ;i++){
-    inst_order[i] = inst->insts[i]->id.execSeqNum;
-}
+    assert(order.isBubble());
 
+    if (!inst)
+        return;
+
+    for(unsigned int i = 0; i < inst->width() ;i++){
+        if (inst->insts[i] && !inst->insts[i]->isBubble())
+            order.push_back(inst->insts[i]->id.execSeqNum);
+    }
 }
 
 unsigned int
 Execute::issue(ThreadID thread_id)
 {
-    const ForwardInstData *insts_in = getInput(thread_id);
-    FillSequence(insts_in);
     ExecuteThreadInfo &thread = executeInfo[thread_id];
+    const ForwardInstData *insts_in = getInput(thread_id);
+    /* filling sequence numbers at the earliest as soon as decode gives 
+    * data out*/
+    if(!thread.inst_order_filled){
+        FillSequence(insts_in);
+        thread.inst_order_filled = true;
+    }
 
     /* Early termination if we have no instructions */
     if (!insts_in)
@@ -338,17 +337,19 @@ Execute::issue(ThreadID thread_id)
             issued = true;
         } else if (cpu.getContext(thread_id)->status() == ThreadContext::Suspended)
         {
-            DPRINTF(CClassCPU, "Discarding inst: %s from suspended"
+            DPRINTF(CClassExecute, "Discarding inst: %s from suspended"
                 " thread\n", *inst);
 
             issued = true;
             discarded = true;
         } else if (inst->id.streamSeqNum != thread.streamSeqNum) {
-            DPRINTF(CClassCPU, "Discarding inst: %s as its stream"
+            DPRINTF(CClassExecute, "Discarding inst: %s as its stream"
                 " state was unexpected, expected: %d\n",
                 *inst, thread.streamSeqNum);
             issued = true;
             discarded = true;
+            /*experimental have no idea if this would cause a problem?*/
+            //setDrainState(tid,)
         } else {
             /* Try and issue an instruction into an FU, assume we didn't and
              * fix that in the loop */
@@ -362,7 +363,7 @@ Execute::issue(ThreadID thread_id)
             do {
                 FUPipeline *fu = funcUnits[fu_index];
 
-                DPRINTF(CClassCPU, "Trying to issue inst: %s to FU: %d\n",
+                DPRINTF(CClassExecute, "Trying to issue inst: %s to FU: %d\n",
                     *inst, fu_index);
 
                 /* Does the examined fu have the OpClass-related capability
@@ -382,10 +383,9 @@ Execute::issue(ThreadID thread_id)
 
                     /* Mark the destinations for this instruction as
                      *  busy */
-                    scoreboard[thread_id].markupInstDests(inst, cpu.curCycle() +
-                        Cycles(0), cpu.getContext(thread_id), false);
+                    scoreboard[thread_id].markupInstDests(inst, cpu.getContext(thread_id));
 
-                    DPRINTF(CClassCPU, "Issuing %s to %d\n", inst->id, noCostFUIndex);
+                    DPRINTF(CClassExecute, "Issuing %s to %d\n", inst->id, noCostFUIndex);
                     inst->fuIndex = noCostFUIndex;
                     inst->extraCommitDelay = Cycles(0);
                     inst->extraCommitDelayExpr = NULL;
@@ -399,44 +399,39 @@ Execute::issue(ThreadID thread_id)
                 } else if (!fu_is_capable || fu->alreadyPushed()) {
                     /* Skip */
                     if (!fu_is_capable) {
-                        DPRINTF(CClassCPU, "Can't issue as FU: %d isn't"
+                        DPRINTF(CClassExecute, "Can't issue as FU: %d isn't"
                             " capable\n", fu_index);
                     } else {
-                        DPRINTF(CClassCPU, "Can't issue as FU: %d is"
+                        DPRINTF(CClassExecute, "Can't issue as FU: %d is"
                             " already busy\n", fu_index);
                     }
                 } else if (fu->stalled) {
-                    DPRINTF(CClassCPU, "Can't issue inst: %s into FU: %d,"
+                    DPRINTF(CClassExecute, "Can't issue inst: %s into FU: %d,"
                         " it's stalled\n",
                         *inst, fu_index);
                 } else if (!fu->canInsert()) {
-                    DPRINTF(CClassCPU, "Can't issue inst: %s to busy FU"
+                    DPRINTF(CClassExecute, "Can't issue inst: %s to busy FU"
                         " for another: %d cycles\n",
                         *inst, fu->cyclesBeforeInsert());
                 } else {
                     CClassFUTiming *timing = (!inst->isFault() ?
                         fu->findTiming(inst->staticInst) : NULL);
 
-                    const std::vector<Cycles> *src_latencies =
-                        (timing ? &(timing->srcRegsRelativeLats)
-                            : NULL);
+                    /* fu to fu forwarding to be impl later*/
+                    /*const std::vector<bool> *cant_forward_from_fu_indices =
+                        &(fu->cantForwardFromFUIndices);*/
 
-                    const std::vector<bool> *cant_forward_from_fu_indices =
-                        &(fu->cantForwardFromFUIndices);
-
-                    if (timing && timing->suppress) {
-                        DPRINTF(CClassCPU, "Can't issue inst: %s as extra"
+                    if (timing && timing->suppress) {/* no clue what is this*/
+                        DPRINTF(CClassExecute, "Can't issue inst: %s as extra"
                             " decoding is suppressing it\n",
                             *inst);
-                    } else if (!scoreboard[thread_id].canInstIssue(inst,
-                        src_latencies, cant_forward_from_fu_indices,
-                        cpu.curCycle(), cpu.getContext(thread_id)))
+                    } else if (!scoreboard[thread_id].canInstIssue(inst, cpu.getContext(thread_id)))
                     {
-                        DPRINTF(CClassCPU, "Can't issue inst: %s yet\n",
+                        DPRINTF(CClassExecute, "Can't issue inst: %s yet\n",
                             *inst);
                     } else {
                         /* Can insert the instruction into this FU */
-                        DPRINTF(CClassCPU, "Issuing inst: %s"
+                        DPRINTF(CClassExecute, "Issuing inst: %s"
                             " into FU %d\n", *inst,
                             fu_index);
                         // Update ALU access stats.
@@ -452,20 +447,6 @@ Execute::issue(ThreadID thread_id)
                                 cpu.executeStats[tid]->numVecAluAccesses++;
                             }
                         }
-                        Cycles extra_dest_retire_lat = Cycles(0);
-                        TimingExpr *extra_dest_retire_lat_expr = NULL;
-                        Cycles extra_assumed_lat = Cycles(0);
-
-                        /* Add the extraCommitDelay and extraAssumeLat to
-                         *  the FU pipeline timings */
-                        if (timing) {
-                            extra_dest_retire_lat =
-                                timing->extraCommitLat;
-                            extra_dest_retire_lat_expr =
-                                timing->extraCommitLatExpr;
-                            extra_assumed_lat =
-                                timing->extraAssumedLat;
-                        }
 
                         issued_mem_ref = inst->isMemRef();
 
@@ -473,43 +454,43 @@ Execute::issue(ThreadID thread_id)
 
                         /* Decorate the inst with FU details */
                         inst->fuIndex = fu_index;
-                        inst->extraCommitDelay = extra_dest_retire_lat;
-                        inst->extraCommitDelayExpr =
-                            extra_dest_retire_lat_expr;
 
                         // letting to pass through the fu pipeline...
                         if (issued_mem_ref) {
                             /* Remember which instruction this memory op
                              *  depends on so that initiateAcc can be called
                              *  early */
+                            /* have to see about early issues, for now make it always false*/
                             if (allowEarlyMemIssue) {
                                 inst->instToWaitFor =
                                     scoreboard[thread_id].execSeqNumToWaitFor(inst,
                                         cpu.getContext(thread_id));
 
-                                //if (lastMemBarrier(thread_id) >
-                                  //  inst->instToWaitFor)
-                                //{
-                                  //  DPRINTF(CClassCPU, "A barrier will"
-                                    //    " cause a delay in mem ref issue of"
-                                      //  " inst: %s until after inst"
-                                        //" %d(exec)\n", *inst,
-                                        //lastMemBarrier(thread_id));
+                                /*if (lastMemBarrier(thread_id) >
+                                    inst->instToWaitFor)
+                                {
+                                    DPRINTF(CClassExecute, "A barrier will"
+                                        " cause a delay in mem ref issue of"
+                                        " inst: %s until after inst"
+                                        " %d(exec)\n", *inst,
+                                        lastMemBarrier(thread_id));
 
-                                    //inst->instToWaitFor =
-                                      //  lastMemBarrier(thread_id);
-                                //} else {
-                                    DPRINTF(CClassCPU, "Memory ref inst:"
+                                    inst->instToWaitFor =
+                                        lastMemBarrier(thread_id);
+                                } else {*/
+                                    DPRINTF(CClassExecute, "Memory ref inst:"
                                         " %s must wait for inst %d(exec)"
                                         " before issuing\n",
                                         *inst, inst->instToWaitFor);
                                 //}
 
-                                inst->canEarlyIssue = true;
+                                //inst->canEarlyIssue = true;
                             }
                             /* Also queue this instruction in the memory ref
-                             *  queue to ensure in-order issue to the LSQ */
-                            DPRINTF(CClassCPU, "Pushing mem inst: %s\n",
+                             * queue to ensure in-order issue to the memory stage
+                             * for multiple mem requests in flight*/
+
+                            DPRINTF(CClassExecute, "Pushing mem inst: %s\n",
                                 *inst);
                             thread.inFUMemInsts->push(fu_inst);
                         }
@@ -528,12 +509,7 @@ Execute::issue(ThreadID thread_id)
 
                         /* Mark the destinations for this instruction as
                          *  busy */
-                        scoreboard[thread_id].markupInstDests(inst, cpu.curCycle() +
-                            fu->description.opLat +
-                            extra_dest_retire_lat +
-                            extra_assumed_lat,
-                            cpu.getContext(thread_id),
-                            issued_mem_ref && extra_assumed_lat == Cycles(0));
+                        scoreboard[thread_id].markupInstDests(inst,cpu.getContext(thread_id));
 
                         /* Track this instruction until it is ready to push onward. */
                         thread.inFlightInsts.push_back(fu_inst);
@@ -546,7 +522,7 @@ Execute::issue(ThreadID thread_id)
             } while (fu_index != numFuncUnits && !issued);
 
             if (!issued)
-                DPRINTF(CClassCPU, "Didn't issue inst: %s\n", *inst);
+                DPRINTF(CClassExecute, "Didn't issue inst: %s\n", *inst);
         }
 
         if (issued) {
@@ -561,7 +537,7 @@ Execute::issue(ThreadID thread_id)
             if (!discarded && inst->isInst() &&
                 inst->staticInst->isFullMemBarrier())
             {
-                DPRINTF(CClassCPU, "Issuing memory barrier inst: %s\n", *inst);
+                DPRINTF(CClassExecute, "Issuing memory barrier inst: %s\n", *inst);
                 // all of membarrier funcitonality disabled for now..
                 //issuedMemBarrierInst(inst);
             }
@@ -576,26 +552,28 @@ Execute::issue(ThreadID thread_id)
             if (!discarded && !inst->isBubble()) {
                 num_insts_issued++;
 
-                if (num_insts_issued == issueLimit)
-                    DPRINTF(CClassCPU, "Reached inst issue limit\n");
+            if (num_insts_issued == issueLimit)
+                DPRINTF(CClassExecute, "Reached inst issue limit\n");
             }
 
             thread.inputIndex++;
-            DPRINTF(CClassCPU, "Stepping to next inst inputIndex: %d\n",
+            DPRINTF(CClassExecute, "Stepping to next inst inputIndex: %d\n",
                 thread.inputIndex);
         }
 
         /* Got to the end of a line */
         if (thread.inputIndex == insts_in->width()) {
+            /*we have to fill the sequence numbers once 
+            * we get the packet from decode not after we 
+            * finish issuing them?*/
+            //FillSequence(insts_in);
             popInput(thread_id);
+            /* have to reset the inst_order for the new
+            * forwardlinedata */
+            thread.inst_order_filled = false;
             /* Set insts_in to null to force us to leave the surrounding
              *  loop */
             insts_in = NULL;
-
-            if (processMoreThanOneInput) {
-                DPRINTF(CClassCPU, "Wrapping\n");
-                insts_in = getInput(thread_id);
-            }
         }
     } while (insts_in && thread.inputIndex < insts_in->width() &&
         /* We still have instructions */
@@ -626,7 +604,10 @@ Execute::trytoPush(ThreadID tid){
         }
 
         if (inst->isFault() || inst->isNoCostInst()) {
-            if (pushInstToLatch(tid, inst)) {
+            ExecResult result;
+            result.inst = inst;
+
+            if (pushInstToLatch(tid, result)) {
                 it = thread.inFlightInsts.erase(it);
                 continue;
             }
@@ -636,7 +617,7 @@ Execute::trytoPush(ThreadID tid){
         }
 
         if (inst->fuIndex >= numFuncUnits) {
-            DPRINTF(CClassCPU,
+            DPRINTF(CClassExecute,
                 "Skipping unallocated in-flight inst: %s fuIndex=%u\n",
                 *inst, inst->fuIndex);
             it->inst = CClassDynInst::bubble();
@@ -670,17 +651,19 @@ Execute::trytoPush(ThreadID tid){
                     Fault fault = initiateMemAccess(inst, mem_request);
                     if (fault != NoFault) {
                         inst->fault = fault;
-                        DPRINTF(CClassCPU, "Memory issue fault: %s inst: %s\n",
+                        DPRINTF(CClassExecute, "Memory issue fault: %s inst: %s\n",
                             fault->name(), *inst);
                     }
 
                     if (mem_request)
                         pendingMemRequests[request_key] = mem_request;
                 }
-                //fault
+                //fault created while making a memory request to the dcache
                 if (inst->fault != NoFault) {
                     pendingMemRequests.erase(request_key);
-                    if (pushInstToLatch(tid, inst)) {
+                    ExecResult result;
+                    result.inst = inst;
+                    if (pushInstToLatch(tid, result)) {
                         fu->stalled = false;
                         it = thread.inFlightInsts.erase(it);
                         continue;
@@ -689,7 +672,9 @@ Execute::trytoPush(ThreadID tid){
                 else if (mem_request && mem_request->failed()) {
                     inst->fault = mem_request->fault;
                     pendingMemRequests.erase(request_key);
-                    if (pushInstToLatch(tid, inst)) {
+                    ExecResult result;
+                    result.inst = inst;
+                    if (pushInstToLatch(tid, result)) {
                         fu->stalled = false;
                         it = thread.inFlightInsts.erase(it);
                         continue;
@@ -704,19 +689,32 @@ Execute::trytoPush(ThreadID tid){
                         continue;
                     }
                 } else if (mem_request) {
-                    DPRINTF(CClassCPU,
+                    DPRINTF(CClassExecute,
                         "Memory request not ready for memory ISB yet: "
                         "inst=%s state=%d\n",
                         *inst, mem_request->state);
                 }
             }// mem inst handling..
-            else if (pushInstToLatch(tid, inst)) {
+            else {
+                /*normal instruction execution and fault capture*/
+                ExecResult result;
+                result.inst = inst;
+                ExecContext context(cpu, *cpu.threads[inst->id.threadId], this, inst, &result);
+                Fault fault = inst->staticInst->execute(&context, inst->traceData);
+                /*set the dyn instruction to be flagged as a fault from execution*/
+                inst->fault = fault;
+
+                if (!pushInstToLatch(tid, result)) {
+                    ++it;
+                    continue;
+                }
+
                 fu->stalled = false;
                 it = thread.inFlightInsts.erase(it);
                 continue;
             }// any other instruction handling...
         } else if (fu->stalled) {
-            DPRINTF(CClassCPU,
+            DPRINTF(CClassExecute,
                 "FU %u is stalled by head inst: %s execSeq=%llu; "
                 "in-flight inst not ready yet: %s execSeq=%llu\n",
                 inst->fuIndex,
@@ -730,7 +728,7 @@ Execute::trytoPush(ThreadID tid){
         ++it;
     }
 
-    //cleanupInFlightInsts(tid);
+    cleanupInFlightInsts(tid);
 }
 
 void
@@ -766,39 +764,49 @@ Execute::resetISBOutputIndexes(ThreadID tid)
 }
 
 bool
-Execute::pushInstToLatch(ThreadID tid, CClassDynInstPtr inst)
+Execute::pushInstToLatch(ThreadID tid, const ExecResult &result)
 {
     ExecuteThreadInfo &thread = executeInfo[tid];
-    Latch<ForwardInstData>::Input *out = &out_BASE;
+    CClassDynInstPtr inst = result.inst;
+    Latch<ForwardResultData>::Input *out = &out_BASE;
     unsigned int *output_index = &thread.baseOutputIndex;
 
     if (inst->isFault()) {
         out = &out_TRAP;
         output_index = &thread.trapOutputIndex;
+        nextStageReserve_TRAP[tid].reserve();
     } else if (inst->isInst()) {
         OpClass op_class = inst->staticInst->opClass();
 
         if (op_class == enums::IntMult || op_class == enums::IntDiv) {
             out = &out_MBOX;
             output_index = &thread.mboxOutputIndex;
+            nextStageReserve_MBOX[tid].reserve();
         } else if (inst->staticInst->isFloating() ||
                    inst->staticInst->isVector()) {
             out = &out_FBOX;
             output_index = &thread.fboxOutputIndex;
+            nextStageReserve_FBOX[tid].reserve();
         }
+        else
+            nextStageReserve_BASE[tid].reserve();
     }
 
-    ForwardInstData &insts_out = *out->inputWire;
+    ForwardResultData &insts_out = *out->inputWire;
     unsigned int width = thread.instsBeingCommitted.width();
 
     if (insts_out.isBubble()) {
-        insts_out = ForwardInstData(width, tid);
-        insts_out.threadId = tid;
+        /* I don't know if this is correct or not? this has not been done
+        * in minor we are not supposed to fill it with empty result objects 
+        * it pollutes the latches*/
+        //insts_out = ForwardResultData(width, tid);
+        //insts_out.threadId = tid;
+        return false;
     }
 
     if (*output_index < insts_out.width()) {
-        insts_out.insts[*output_index] = inst;
-        DPRINTF(CClassCPU, "Pushed inst %s to ISB slot %u\n",
+        insts_out.results[*output_index] = result;
+        DPRINTF(CClassExecute, "Pushed inst %s to ISB slot %u\n",
             *inst, *output_index);
         (*output_index)++;
         return true;
@@ -813,14 +821,31 @@ Execute::pushMemReqToLatch(ThreadID tid, ExecRequestPtr request)
     ExecuteThreadInfo &thread = executeInfo[tid];
     ForwardMemData &mem_out = *out_MEMORY.inputWire;
 
-    if (!mem_out.isBubble())
+    if (mem_out.isBubble()) {
+        /* I don't know if this is correct or not? this has not been done
+        * in minor we are not supposed to fill it with empty result objects 
+        * it pollutes the latches*/
+       // unsigned int width = thread.instsBeingCommitted.width();
+       // mem_out = ForwardMemData(width, tid);
+       //mem_out.threadId = tid;
+       return false;
+    }
+
+    if (thread.memoryOutputIndex >= mem_out.width())
         return false;
 
-    mem_out = ForwardMemData(request, tid);
+    mem_out.requests[thread.memoryOutputIndex] = request;
+    nextStageReserve_MEMORY[tid].reserve();
     thread.memoryOutputIndex++;
 
-    DPRINTF(CClassCPU, "Pushed memory request for inst %s to memory latch\n",
-        *request->inst);
+    DPRINTF(CClassExecute,
+        "Pushed memory request to memory latch: slot=%u execSeq=%llu "
+        "staticInst=%s\n",
+        thread.memoryOutputIndex - 1,
+        request && request->inst ? request->inst->id.execSeqNum : 0,
+        request && request->inst && request->inst->staticInst ?
+            request->inst->staticInst->getName() :
+            "null");
     return true;
 }
 
@@ -831,9 +856,9 @@ Execute::issuedMemBarrierInst(CClassDynInstPtr inst)
     assert(inst->isInst() && inst->staticInst->isFullMemBarrier());
     assert(inst->id.execSeqNum > lastMemBarrier[inst->id.threadId]);
 
-    /* Remember the barrier.  We only have a notion of one
-     *  barrier so this may result in some mem refs being
-     *  delayed if they are between barriers 
+    // Remember the barrier. We only have a notion of one
+    // barrier so this may result in some mem refs being
+    // delayed if they are between barriers.
     lastMemBarrier[inst->id.threadId] = inst->id.execSeqNum;
 }*/
 
@@ -841,9 +866,9 @@ Execute::issuedMemBarrierInst(CClassDynInstPtr inst)
 void
 Execute::recvTimingSnoopReq(PacketPtr pkt)
 {
-    /* LLSC operations in Minor can't be speculative and are executed from
-     * the head of the requests queue.  We shouldn't need to do more than
-     * this action on snoops. 
+    // LLSC operations in Minor can't be speculative and are executed from
+    // the head of the requests queue. We shouldn't need to do more than
+    // this action on snoops.
     for (ThreadID tid = 0; tid < cpu.numThreads; tid++) {
         if (cpu.getCpuAddrMonitor(tid)->doMonitor(pkt)) {
             cpu.wakeup(tid);
@@ -860,9 +885,9 @@ Execute::recvTimingSnoopReq(PacketPtr pkt)
 void
 Execute::recvTimingSnoopReq(PacketPtr pkt)
 {
-    /* LLSC operations in Minor can't be speculative and are executed from
-     * the head of the requests queue.  We shouldn't need to do more than
-     * this action on snoops. 
+    // LLSC operations in Minor can't be speculative and are executed from
+    // the head of the requests queue. We shouldn't need to do more than
+    // this action on snoops.
     for (ThreadID tid = 0; tid < cpu.numThreads; tid++) {
         if (cpu.getCpuAddrMonitor(tid)->doMonitor(pkt)) {
             cpu.wakeup(tid);
@@ -880,40 +905,40 @@ Execute::recvTimingSnoopReq(PacketPtr pkt)
 void
 Execute::recvReqRetry()
 {
-    DPRINTF(CClassCPU, "Received retry request\n");
+    DPRINTF(CClassExecute, "Received retry request\n");
 
     assert(state == MemoryNeedsRetry);
 
     switch (retryRequest->state) {
       case LSQRequest::RequestNeedsRetry:
-        /* Retry in the requests queue 
+        // Retry in the requests queue.
         retryRequest->setState(LSQRequest::Translated);
         break;
       case LSQRequest::StoreBufferNeedsRetry:
-        /* Retry in the store buffer 
+        // Retry in the store buffer.
         retryRequest->setState(LSQRequest::StoreInStoreBuffer);
         break;
       default:
         panic("Unrecognized retry request state %d.", retryRequest->state);
     }
 
-    /* Set state back to MemoryRunning so that the following
-     *  tryToSend can actually send.  Note that this won't
-     *  allow another transfer in as tryToSend should
-     *  issue a memory request and either succeed for this
-     *  request or return the LSQ back to MemoryNeedsRetry 
+    // Set state back to MemoryRunning so that the following
+    // tryToSend can actually send. Note that this won't
+    // allow another transfer in as tryToSend should
+    // issue a memory request and either succeed for this
+    // request or return the LSQ back to MemoryNeedsRetry.
     state = MemoryRunning;
 
-    /* Try to resend the request 
+    // Try to resend the request.
     if (tryToSend(retryRequest)) {
-        /* Successfully sent, need to move the request 
+        // Successfully sent, need to move the request.
         switch (retryRequest->state) {
           case LSQRequest::RequestIssuing:
-            /* In the requests queue 
+            // In the requests queue.
             moveFromRequestsToTransfers(retryRequest);
             break;
           case LSQRequest::StoreBufferIssuing:
-            /* In the store buffer 
+            // In the store buffer.
             storeBuffer.countIssuedStore(retryRequest);
             break;
           default:
@@ -974,17 +999,19 @@ Execute::getIssuingThread()
 
 void
 Execute::handleBranch(ThreadID tid, CClassDynInstPtr inst)
-{
+{   /*branch predictor support to be added*/
     ThreadContext *thread = cpu.getContext(tid);
     std::unique_ptr<PCStateBase> sequential_pc(inst->pc->clone());
     sequential_pc->advance();
 
-    ExecContext context(cpu, *cpu.threads[tid], *this, inst);
+    ExecResult result;
+    result.inst = inst;
+    ExecContext context(cpu, *cpu.threads[tid], this, inst, &result);
     Fault fault = inst->staticInst->execute(&context, inst->traceData);
 
     if (fault != NoFault) {
         inst->fault = fault;
-        DPRINTF(CClassCPU, "Branch execution fault: %s inst: %s\n",
+        DPRINTF(CClassExecute, "Branch execution fault: %s inst: %s\n",
             fault->name(), *inst);
         return;
     }
@@ -1001,7 +1028,7 @@ Execute::handleBranch(ThreadID tid, CClassDynInstPtr inst)
     *out_fetch2.inputWire = branch_fetch1;
     *out_decode.inputWire = branch_fetch1;
 
-    DPRINTF(CClassCPU, "Handled branch inst: %s taken=%d target=%s\n",
+    DPRINTF(CClassExecute, "Handled branch inst: %s taken=%d target=%s\n",
         *inst, taken, target);
 }
 
@@ -1027,7 +1054,7 @@ Execute::updateBranchData(
                 : inst->id.predictionSeqNum),
             target, inst);
 
-        DPRINTF(CClassCPU, "Branch data signalled: %s\n", branch);
+        DPRINTF(CClassExecute, "Branch data signalled: %s\n", branch);
     }
 }
 
@@ -1039,7 +1066,10 @@ Execute::initiateMemAccess(CClassDynInstPtr inst, ExecRequestPtr &request)
 
     requestBeingIssued.reset();
 
-    ExecContext context(cpu, *cpu.threads[inst->id.threadId], *this, inst);
+    ExecResult result;
+    result.inst = inst;
+    ExecContext context(cpu, *cpu.threads[inst->id.threadId], this, inst,
+        &result);
     Fault fault = inst->staticInst->initiateAcc(&context, inst->traceData);
 
     request = requestBeingIssued;
@@ -1073,7 +1103,7 @@ Execute::initiateMemRead(CClassDynInstPtr inst, Addr addr, unsigned int size,
     requestBeingIssued = request;
     request->markInTranslation();
 
-    DPRINTF(CClassCPU,
+    DPRINTF(CClassExecute,
         "DTLB translation request: inst=%s type=load vaddr=%#x size=%u\n",
         *inst, addr, size);
 
@@ -1103,7 +1133,7 @@ Execute::writeMem(CClassDynInstPtr inst, uint8_t *data, unsigned int size,
     requestBeingIssued = request;
     request->markInTranslation();
 
-    DPRINTF(CClassCPU,
+    DPRINTF(CClassExecute,
         "DTLB translation request: inst=%s type=store vaddr=%#x size=%u\n",
         *inst, addr, size);
 
@@ -1140,13 +1170,13 @@ Execute::displayseqnums(){
 
     for (unsigned int i = 0; i < input->width(); i++) {
         if (input->insts[i] && !input->insts[i]->isBubble()) {
-            DPRINTF(CClassCPU, "%llu, ",
+            DPRINTF(CClassExecute, "%llu, ",
                 input->insts[i]->id.execSeqNum);
         } else {
-            DPRINTF(CClassCPU, "BUBBLE, ");
+            DPRINTF(CClassExecute, "BUBBLE, ");
         }
     }
-    DPRINTF(CClassCPU, "\n");
+    DPRINTF(CClassExecute, "\n");
 
 
 
@@ -1157,12 +1187,12 @@ Execute::finishMemTranslation(ExecRequest *request, const Fault &fault)
 {
     if (fault != NoFault) {
         request->markFault(fault);
-        DPRINTF(CClassCPU, "DTLB translation fault: inst=%s type=%s fault=%s\n",
+        DPRINTF(CClassExecute, "DTLB translation fault: inst=%s type=%s fault=%s\n",
             *request->inst, request->isLoad ? "load" : "store",
             fault->name());
     } else {
         request->markTranslated();
-        DPRINTF(CClassCPU, "DTLB translation complete: inst=%s type=%s\n",
+        DPRINTF(CClassExecute, "DTLB translation complete: inst=%s type=%s\n",
             *request->inst, request->isLoad ? "load" : "store");
         sendTimingMemReq(request);
     }
@@ -1178,11 +1208,11 @@ Execute::sendTimingMemReq(ExecRequest *request)
     if (!request->packet)
         request->makePacket();
 
-    DPRINTF(CClassCPU, "Dcache request: inst=%s type=%s\n",
+    DPRINTF(CClassExecute, "Dcache request: inst=%s type=%s\n",
         *request->inst, request->isLoad ? "load" : "store");
 
     if (dcachePort.sendTimingReq(request->packet)) {
-        DPRINTF(CClassCPU, "Dcache request accepted: inst=%s type=%s\n",
+        DPRINTF(CClassExecute, "Dcache request accepted: inst=%s type=%s\n",
             *request->inst, request->isLoad ? "load" : "store");
         request->packet = nullptr;
         request->markSent();
@@ -1191,7 +1221,7 @@ Execute::sendTimingMemReq(ExecRequest *request)
 
     retryRequest = request;
     request->markRetry();
-    DPRINTF(CClassCPU, "Dcache request blocked: inst=%s type=%s\n",
+    DPRINTF(CClassExecute, "Dcache request blocked: inst=%s type=%s\n",
         *request->inst, request->isLoad ? "load" : "store");
     return false;
 }
@@ -1201,7 +1231,7 @@ Execute::recvTimingResp(PacketPtr pkt)
 {
     ExecRequest *request = safe_cast<ExecRequest *>(pkt->popSenderState());
 
-   /* DPRINTF(CClassCPU, "Dcache response: execSeq=%llu type=%s\n",
+   /* DPRINTF(CClassExecute, "Dcache response: execSeq=%llu type=%s\n",
     request->inst->id.execSeqNum,
     request->isLoad ? "load" : "store");
     */
@@ -1225,6 +1255,11 @@ Execute::recvReqRetry()
 
     cpu.wakeupOnEvent(Pipeline::ExecuteStageId);
 }
+bool
+Execute::lookForForwards(ThreadID tid, const RegId& reg, RegVal& forwarded_val){
+    return scoreboard[tid].lookForForwards(tid, reg, forwarded_val);
+}
+
 
 Execute::~Execute()
 {

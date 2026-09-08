@@ -10,6 +10,14 @@ namespace gem5
 namespace cclass
 {
 
+void
+InstOrderData::reportData(std::ostream &os) const
+{
+    os << "instOrder:";
+    for (const auto seq_num : seqNums)
+        os << ' ' << seq_num;
+}
+
 ExecRequest::ExecRequest(Execute &execute_, CClassDynInstPtr inst_,
     bool is_load, uint8_t *store_data, unsigned int size, uint64_t *res_) :
     execute(execute_),
@@ -165,6 +173,26 @@ ForwardInstData::isBubble() const
 {
     return numInsts == 0 || insts[0]->isBubble();
 }
+/* Not needed for forwardinstdata, it was done previously for older pipe.
+* Don't use this! */
+bool
+ForwardInstData::containsExecSeqNum(ThreadID tid, InstSeqNum seq_num) const
+{
+    if (threadId != InvalidThreadID && threadId != tid)
+        return false;
+
+    for (unsigned int i = 0; i < width(); i++) {
+        CClassDynInstPtr inst = insts[i];
+        if (inst && !inst->isBubble() &&
+            inst->id.threadId == tid &&
+            inst->id.execSeqNum == seq_num)
+        {
+            return true;
+        }
+    }
+
+    return false;
+}
 
 void
 ForwardInstData::bubbleFill()
@@ -180,6 +208,179 @@ ForwardInstData::resize(unsigned int width)
     numInsts = width;
 
     bubbleFill();
+}
+
+ForwardResultData::ForwardResultData(unsigned int width, ThreadID tid) :
+    numResults(width), threadId(tid)
+{
+    bubbleFill();
+}
+
+ForwardResultData::ForwardResultData(const ExecResult &result_, ThreadID tid) :
+    numResults(1), threadId(tid)
+{
+    bubbleFill();
+    results[0] = result_;
+}
+
+ForwardResultData::ForwardResultData(const ForwardResultData &src)
+{
+    *this = src;
+}
+
+ForwardResultData &
+ForwardResultData::operator =(const ForwardResultData &src)
+{
+    numResults = src.numResults;
+    threadId = src.threadId;
+
+    for (unsigned int i = 0; i < src.numResults; i++) {
+        results[i] = src.results[i];
+    }
+
+    return *this;
+}
+
+void
+ForwardResultData::resize(unsigned int width)
+{
+    assert(width <= MAX_FORWARD_INSTS);
+    numResults = width;
+
+    bubbleFill();
+}
+
+void
+ForwardResultData::bubbleFill()
+{
+    for (unsigned int i = 0; i < numResults; i++) {
+        results[i] = ExecResult();
+    }
+}
+
+bool
+ForwardResultData::isBubble() const
+{
+    return numResults == 0 || !results[0].inst ||
+        results[0].inst->isBubble();
+}
+
+bool
+ForwardResultData::containsExecSeqNum(ThreadID tid, InstSeqNum seq_num) const
+{
+    if (threadId != InvalidThreadID && threadId != tid)
+        return false;
+
+    for (unsigned int i = 0; i < width(); i++) {
+        CClassDynInstPtr inst = results[i].inst;
+        if (inst && !inst->isBubble() &&
+            inst->id.threadId == tid &&
+            inst->id.execSeqNum == seq_num)
+        {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+RegVal
+ForwardResultData::forwardRegResult(ThreadID tid, InstSeqNum seq_num,const RegId &reg) const{
+    
+    if (threadId != InvalidThreadID && threadId != tid)
+        return NULL;
+
+    for (unsigned int i = 0; i < width(); i++) {
+        CClassDynInstPtr inst = results[i].inst;
+        if (inst && !inst->isBubble() &&
+            inst->id.threadId == tid &&/* tid stuff I haven't seen yet!*/
+            inst->id.execSeqNum == seq_num)
+        {
+            for(auto &write : results[i].writes){
+                if(write.reg == reg)
+                    return write.val;
+                
+            }
+        }
+    }
+
+    return NULL;
+}
+
+ForwardMemData::ForwardMemData(unsigned int width, ThreadID tid) :
+    numRequests(width), threadId(tid)
+{
+    bubbleFill();
+}
+
+ForwardMemData::ForwardMemData(ExecRequestPtr request_, ThreadID tid) :
+    numRequests(1), threadId(tid)
+{
+    bubbleFill();
+    requests[0] = request_;
+}
+
+ForwardMemData::ForwardMemData(const ForwardMemData &src)
+{
+    *this = src;
+}
+
+ForwardMemData &
+ForwardMemData::operator =(const ForwardMemData &src)
+{
+    numRequests = src.numRequests;
+    threadId = src.threadId;
+
+    for (unsigned int i = 0; i < src.numRequests; i++) {
+        requests[i] = src.requests[i];
+    }
+
+    return *this;
+}
+
+void
+ForwardMemData::resize(unsigned int width)
+{
+    assert(width <= MAX_FORWARD_INSTS);
+    numRequests = width;
+
+    bubbleFill();
+}
+
+void
+ForwardMemData::bubbleFill()
+{
+    for (unsigned int i = 0; i < numRequests; i++) {
+        requests[i] = nullptr;
+    }
+}
+
+bool
+ForwardMemData::isBubble() const
+{
+    return numRequests == 0 || !requests[0];
+}
+
+/* Not needed for forwardMemdata, it was done previously for older pipe.
+* Don't use this ever*/
+bool
+ForwardMemData::containsExecSeqNum(ThreadID tid, InstSeqNum seq_num) const
+{
+    if (threadId != InvalidThreadID && threadId != tid)
+        return false;
+
+    for (unsigned int i = 0; i < width(); i++) {
+        ExecRequestPtr request = requests[i];
+        CClassDynInstPtr inst = request ? request->inst : nullptr;
+        if (inst && !inst->isBubble() &&
+            inst->id.threadId == tid &&
+            inst->id.execSeqNum == seq_num)
+        {
+            return true;
+        }
+    }
+
+    return false;
 }
 /*
 void

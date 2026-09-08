@@ -14,6 +14,8 @@
 #include "cpu/cclass/execute.hh"
 #include "cpu/cclass/fetch1.hh"
 #include "cpu/cclass/fetch2.hh"
+#include "cpu/cclass/memory.hh"
+#include "cpu/cclass/writeback.hh"
 #include "params/BaseCClassCPU.hh"
 #include "sim/ticked_object.hh"
 
@@ -46,12 +48,19 @@ class Pipeline : public Ticked
     Latch<BranchData> eToF1;
     Latch<BranchData> eToF2;
     Latch<BranchData> eToD;
-    Latch<ForwardInstData> eToBASE;
+    Latch<ForwardResultData> eToBASE;
     Latch<ForwardMemData> eToMEMORY;
-    Latch<ForwardInstData> eToTRAP;
-    Latch<ForwardInstData> eToMBOX;
-    Latch<ForwardInstData> eToFBOX;
+    Latch<ForwardResultData> eToTRAP;
+    Latch<ForwardResultData> eToMBOX;
+    Latch<ForwardResultData> eToFBOX;
+    Latch<InstOrderData> instOrder;
+    Latch<ForwardResultData> mToCOMMON;
+    Latch<ForwardMemData> mToCOMMON_MEM;
+    Latch<ForwardResultData> mToTRAP;
+    Latch<InstOrderData> memOrder;
 
+    Writeback writeback;
+    Memory memory;
     Execute execute;
     Decode decode;
     Fetch2 fetch2;

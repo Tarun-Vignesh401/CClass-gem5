@@ -7,6 +7,8 @@
 #include "cpu/cclass/execute.hh"
 #include "cpu/cclass/fetch1.hh"
 #include "cpu/cclass/fetch2.hh"
+#include "cpu/cclass/memory.hh"
+#include "cpu/cclass/writeback.hh"
 //#include "debug/Drain.hh" // auto - generated stuff
 #include "debug/CClassCPU.hh"
 //#include "debug/MinorTrace.hh"
@@ -43,10 +45,31 @@ Pipeline::Pipeline(CClassCPU &cpu_, const BaseCClassCPUParams &params) :
         params.executeToMemoryForwardDelay),
     eToFBOX(cpu.name() + ".eToFBOX", "insts",
         params.executeToMemoryForwardDelay),
+    instOrder(cpu.name() + ".instOrder", "inst_order",
+        params.executeToMemoryForwardDelay),
+    mToCOMMON(cpu.name() + ".mToCOMMON", "insts",
+        params.executeToMemoryForwardDelay),
+    mToCOMMON_MEM(cpu.name() + ".mToCOMMON_MEM", "mem_reqs",
+        params.executeToMemoryForwardDelay),
+    mToTRAP(cpu.name() + ".mToTRAP", "insts",
+        params.executeToMemoryForwardDelay),
+    memOrder(cpu.name() + ".memOrder", "inst_order",
+        params.executeToMemoryForwardDelay),
+    writeback(cpu.name() + ".writeback", cpu, params,
+        mToCOMMON.output(), mToTRAP.output(), memOrder.output()),
+    memory(cpu.name() + ".memory", cpu, params,
+        eToBASE.output(), eToMEMORY.output(), eToTRAP.output(),
+        eToMBOX.output(), eToFBOX.output(), instOrder.output(),
+        mToCOMMON.input(), mToTRAP.input(),
+        memOrder.input(), writeback.inputBuffer_COMMON,
+        writeback.inputBuffer_TRAP),
     execute(cpu.name() + ".execute", cpu, params,
         dToE.output(), eToF1.input(), eToF2.input(), eToD.input(),
         eToBASE.input(), eToMEMORY.input(), eToTRAP.input(),
-        eToMBOX.input(), eToFBOX.input()),
+        eToMBOX.input(), eToFBOX.input(), memory.inputBuffer_BASE,
+        memory.inputBuffer_MEMORY, memory.inputBuffer_TRAP,
+        memory.inputBuffer_MBOX, memory.inputBuffer_FBOX,
+        instOrder.input()),
     decode(cpu.name() + ".decode", cpu, params, eToD.output(),
         f2ToD.output(), dToE.input(), execute.inputBuffer),
     fetch2(cpu.name() + ".fetch2", cpu, params, eToF2.output(), f1ToF2.output(),
@@ -118,6 +141,8 @@ Pipeline::evaluate()
      //std::cout<<"I am in decode !!\n";
 
     execute.evaluate();
+    memory.evaluate();
+    writeback.evaluate();
 
     //std::cout << "current cycle : " << cpu.curCycle() << "\n";
     /*if (debug::MinorTrace)
@@ -134,6 +159,11 @@ Pipeline::evaluate()
     eToTRAP.evaluate();
     eToMBOX.evaluate();
     eToFBOX.evaluate();
+    instOrder.evaluate();
+    mToCOMMON.evaluate();
+    mToCOMMON_MEM.evaluate();
+    mToTRAP.evaluate();
+    memOrder.evaluate();
 
     //fetch2.finaldebugprint();
 
