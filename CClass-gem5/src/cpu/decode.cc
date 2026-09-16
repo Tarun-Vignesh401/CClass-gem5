@@ -116,7 +116,7 @@ if (!inp.outputWire->isBubble())
 
     assert(insts_out.isBubble());
 
-    if (tid != InvalidThreadID) {
+    if (tid != InvalidThreadID && !decodeInfo[tid].blocked) {
         DecodeThreadInfo &decode_info = decodeInfo[tid];
         unsigned wordOffset = decode_info.inputIndex & ~0x3;
 

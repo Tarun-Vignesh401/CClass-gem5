@@ -36,6 +36,7 @@ Fetch2::Fetch2(const std::string &name_, CClassCPU &cpu_,
     numFetchesInMemorySystem(0),
     lineSeqNum(InstId::firstLineSeqNum),
     threadPriority(0),
+    fetch2Info(params.numThreads),
     streamSeqNum(params.numThreads, InstId::firstStreamSeqNum),
     predictionSeqNum(params.numThreads, InstId::firstPredictionSeqNum),
     fetch2_thread(nullptr),
@@ -364,12 +365,14 @@ Fetch2::processResponse(Fetch2::FetchRequestPtr response,
          *  deallocate the packet */
         response->packet = NULL;
 }
-        std::cout << "im returning man" << std::endl;
 }
 void 
 Fetch2::evaluate(){
     if (checkRedirect())
         return;
+
+    for (ThreadID tid = 0; tid < cpu.numThreads; ++tid)
+        fetch2Info[tid].blocked = !nextStageReserve[tid].canReserve();
 
     ThreadID fetch_tid = in_thread.outputWire->tid;
     //const Fetch1ThreadInfo* thread = getInput(fetch_tid);
@@ -389,7 +392,9 @@ if(fetch2_thread)
   
     if (fetch_tid != InvalidThreadID) {
             //DPRINTF(CClassFetch2, "Fetching from thread %d\n", fetch_tid);
-            if(numInFlightFetches() < fetchLimit && (fetchState == FetchWaiting)){
+            if(!fetch2Info[fetch_tid].blocked &&
+                numInFlightFetches() < fetchLimit &&
+                (fetchState == FetchWaiting)){
             /* Generate fetch to selected thread */
             finaldebugprint(fetch_tid,fetch2_thread);
             fetchLine(fetch_tid,fetch2_thread);
@@ -427,7 +432,6 @@ if(fetch2_thread)
 
             processResponse(response,line_out,fetch2_thread);
             fetchState = FetchWaiting;
-            std::cout << "I have set it to FetchWaiting \n";
             popInput(fetch_tid);
 
         }

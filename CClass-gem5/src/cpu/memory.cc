@@ -19,8 +19,8 @@ Memory::Memory(const std::string &name_, CClassCPU &cpu_,
     Latch<ForwardResultData>::Input out_COMMON_,
     Latch<ForwardResultData>::Input out_TRAP_,
     Latch<InstOrderData>::Input out_order_,
-    std::vector<InputBuffer<ForwardResultData>> &nextStageReserve_COMMON_,
-    std::vector<InputBuffer<ForwardResultData>> &nextStageReserve_TRAP_) :
+    std::vector<InstructionInputBuffer<ForwardResultData>> &nextStageReserve_COMMON_,
+    std::vector<InstructionInputBuffer<ForwardResultData>> &nextStageReserve_TRAP_) :
     Named(name_),
     cpu(cpu_),
     in_BASE(in_BASE_),
@@ -33,7 +33,7 @@ Memory::Memory(const std::string &name_, CClassCPU &cpu_,
     out_TRAP(out_TRAP_),
     out_order(out_order_),
     inputBuffer_ORDER(name_ + ".inputBuffer_ORDER", "inst_order",
-        params.executeInputBufferSize),
+        params.executeInputBufferSize * MAX_FORWARD_INSTS),
     nextStageReserve_COMMON(nextStageReserve_COMMON_),
     nextStageReserve_TRAP(nextStageReserve_TRAP_),
     memoryIssueLimit(params.memoryIssueLimit),
@@ -66,7 +66,7 @@ Memory::getMemInput(ThreadID tid)
 
 ForwardResultData *
 Memory::getInstInput(ThreadID tid,
-    std::vector<InputBuffer<ForwardResultData>> &input_buffer)
+    std::vector<InstructionInputBuffer<ForwardResultData>> &input_buffer)
 {
     if (input_buffer[tid].empty())
         return nullptr;
@@ -83,7 +83,7 @@ Memory::popMemInput(ThreadID tid)
 
 void
 Memory::popInstInput(ThreadID tid,
-    std::vector<InputBuffer<ForwardResultData>> &input_buffer)
+    std::vector<InstructionInputBuffer<ForwardResultData>> &input_buffer)
 {
     if (!input_buffer[tid].empty())
         input_buffer[tid].pop();
@@ -112,27 +112,22 @@ Memory::pushCommon(ThreadID tid, const ExecResult &result)
     CClassDynInstPtr inst = result.inst;
     MemoryThreadInfo &thread = memoryInfo[tid];
     unsigned int index = thread.commonOutputIndex;
-    if (common_out.isBubble()) {
-        /*same as execute stage*/
-        //common_out = ForwardResultData(MAX_FORWARD_INSTS, tid);
-        //common_out.threadId = tid;
+
+    if (index >= MAX_FORWARD_INSTS)
         return false;
-    }
 
-        if (!common_out.results[index].inst ||
-            common_out.results[index].inst->isBubble())
-        {
-            common_out.results[index] = result;
-            DPRINTF(CClassMemory,
-                "Memory pushed common inst: slot=%u execSeq=%llu "
-                "staticInst=%s\n",
-                index, inst->id.execSeqNum,
-                inst->staticInst ? inst->staticInst->getName() : "null");
-            return true;
-        }
-     
+    ExecResult &slot = common_out.results[index];
+    if (slot.inst && !slot.inst->isBubble())
+        return false;
 
-    return false;
+    common_out.threadId = tid;
+    slot = result;
+    DPRINTF(CClassMemory,
+        "Memory pushed common inst: slot=%u execSeq=%llu "
+        "staticInst=%s\n",
+        index, inst->id.execSeqNum,
+        inst->staticInst ? inst->staticInst->getName() : "null");
+    return true;
 }
 /*
 bool
@@ -170,28 +165,22 @@ Memory::pushTrap(ThreadID tid, const ExecResult &result)
     MemoryThreadInfo &thread = memoryInfo[tid];
     unsigned int index = thread.trapOutputIndex;
 
-    if (trap_out.isBubble()) {
-        /*same as the execute stage*/
-        //trap_out = ForwardResultData(MAX_FORWARD_INSTS, tid);
-        //trap_out.threadId = tid;
+
+    if (index >= MAX_FORWARD_INSTS)
         return false;
-    }
 
+    ExecResult &slot = trap_out.results[index];
+    if (slot.inst && !slot.inst->isBubble())
+        return false;
 
-    if (!trap_out.results[index].inst ||
-        trap_out.results[index].inst->isBubble())
-    {
-        trap_out.results[index] = result;
-        DPRINTF(CClassMemory,
-            "Memory pushed trap inst: slot=%u execSeq=%llu "
-            "staticInst=%s\n",
-            index, inst->id.execSeqNum,
-            inst->staticInst ? inst->staticInst->getName() : "null");
-        return true;
-    }
-
-
-    return false;
+    trap_out.threadId = tid;
+    slot = result;
+    DPRINTF(CClassMemory,
+        "Memory pushed trap inst: slot=%u execSeq=%llu "
+        "staticInst=%s\n",
+        index, inst->id.execSeqNum,
+        inst->staticInst ? inst->staticInst->getName() : "null");
+    return true;
 }
 
 void
@@ -200,31 +189,31 @@ Memory::resetConsumedInputs(ThreadID tid)
     MemoryThreadInfo &thread = memoryInfo[tid];
 
     ForwardResultData *base = getInstInput(tid, inputBuffer_BASE);
-    if (base && thread.baseInputIndex >= base->width()) {
+    if (base && thread.baseInputIndex >= base->validEntries()) {
         popInstInput(tid, inputBuffer_BASE);
         thread.baseInputIndex = 0;
     }
 
     ForwardResultData *trap = getInstInput(tid, inputBuffer_TRAP);
-    if (trap && thread.trapInputIndex >= trap->width()) {
+    if (trap && thread.trapInputIndex >= trap->validEntries()) {
         popInstInput(tid, inputBuffer_TRAP);
         thread.trapInputIndex = 0;
     }
 
     ForwardResultData *mbox = getInstInput(tid, inputBuffer_MBOX);
-    if (mbox && thread.mboxInputIndex >= mbox->width()) {
+    if (mbox && thread.mboxInputIndex >= mbox->validEntries()) {
         popInstInput(tid, inputBuffer_MBOX);
         thread.mboxInputIndex = 0;
     }
 
     ForwardResultData *fbox = getInstInput(tid, inputBuffer_FBOX);
-    if (fbox && thread.fboxInputIndex >= fbox->width()) {
+    if (fbox && thread.fboxInputIndex >= fbox->validEntries() ) {
         popInstInput(tid, inputBuffer_FBOX);
         thread.fboxInputIndex = 0;
     }
 
     ForwardMemData *mem = getMemInput(tid);
-    if (mem && thread.memoryInputIndex >= mem->width()) {
+    if (mem && thread.memoryInputIndex >= mem->validEntries()) {
         popMemInput(tid);
         thread.memoryInputIndex = 0;
     }
@@ -235,11 +224,11 @@ Memory::resetConsumedInputs(ThreadID tid)
         thread.order_index = 0;
     }
     ForwardResultData& isb_COMMON = *out_COMMON.inputWire;
-    if((!isb_COMMON.isBubble()) && thread.commonOutputIndex >= isb_COMMON.width() )
+    if((!isb_COMMON.isBubble()) && thread.commonOutputIndex >= MAX_FORWARD_INSTS )
         thread.commonOutputIndex = 0;
 
     ForwardResultData& isb_TRAP = *out_TRAP.inputWire;
-    if((!isb_TRAP.isBubble()) && thread.trapOutputIndex >= isb_TRAP.width()  )
+    if((!isb_TRAP.isBubble()) && thread.trapOutputIndex >= MAX_FORWARD_INSTS)
         thread.trapOutputIndex = 0;
 
 }
@@ -269,6 +258,8 @@ Memory::evaluate()
 
     ThreadID tid = 0;
     MemoryThreadInfo &thread = memoryInfo[tid];
+    thread.commonOutputIndex = 0;
+    thread.trapOutputIndex = 0;
     ForwardResultData *inst_base = getInstInput(tid, inputBuffer_BASE);
     ForwardResultData *inst_trap = getInstInput(tid, inputBuffer_TRAP);
     ForwardResultData *inst_mbox = getInstInput(tid, inputBuffer_MBOX);
@@ -378,7 +369,7 @@ Memory::evaluate()
                         ExecResult result;
                         ExecContext context(cpu, *cpu.threads[inst->id.threadId], inst, &result);
                         inst->staticInst->completeAcc(packet, &context, inst->traceData);
-
+                        result.inst = inst;
                         if (pushCommon(tid, result)) {
                             nextStageReserve_COMMON[tid].reserve();
                             thread.memoryInputIndex++;
@@ -395,7 +386,7 @@ Memory::evaluate()
                 }
         }
 
-        DPRINTF(CClassMemory, "We are currently processing the output Index: %d",
+        DPRINTF(CClassMemory, "We are currently processing the output Index: %d\n",
             thread.order_index);
 
         /*if there is no eligible instructions this cycle just break 

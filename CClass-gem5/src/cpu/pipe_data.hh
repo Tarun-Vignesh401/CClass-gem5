@@ -114,6 +114,8 @@ class InstOrderData
 
     bool isBubble() const { return seqNums.empty(); }
 
+    unsigned int validEntries() const { return seqNums.size(); }
+
     void reportData(std::ostream &os) const;
 };
     
@@ -307,28 +309,29 @@ class ForwardResultData
 {
   public:
     ExecResult results[MAX_FORWARD_INSTS];
-    unsigned int numResults;
+    //unsigned int numResults = MAX_FORWARD_INSTS;
     ThreadID threadId = 0;
 
   public:
-    explicit ForwardResultData(unsigned int width = 0,
-                               ThreadID tid = InvalidThreadID);
+    explicit ForwardResultData(ThreadID tid = InvalidThreadID);
 
     ForwardResultData(const ExecResult &result_, ThreadID tid);
 
     ForwardResultData(const ForwardResultData &src);
 
-    unsigned int width() const { return numResults; }
+    //unsigned int width() const { return numResults; }
 
     ForwardResultData &operator =(const ForwardResultData &src);
 
-    void resize(unsigned int width);
+    //void resize(unsigned int width);
 
     void bubbleFill();
 
     static ForwardResultData bubble() { return ForwardResultData(); }
 
     bool isBubble() const;
+
+    unsigned int validEntries() const;
 
     bool containsExecSeqNum(ThreadID tid, InstSeqNum seq_num) const;
     
@@ -386,26 +389,27 @@ class ForwardMemData
   public:
     ExecRequestPtr requests[MAX_FORWARD_INSTS];
     /*make this private !! change in pushmemtolatch/pushinsttolatch */
-    unsigned int numRequests;
+    //unsigned int numRequests = MAX_FORWARD_INSTS;
     ThreadID threadId = 0;
 
-    explicit ForwardMemData(unsigned int width = 0,
-                            ThreadID tid = InvalidThreadID);
+    explicit ForwardMemData(ThreadID tid = InvalidThreadID);
 
     ForwardMemData(ExecRequestPtr request_, ThreadID tid);
 
     ForwardMemData(const ForwardMemData &src);
 
-    unsigned int width() const { return numRequests; }
+   // unsigned int width() const { return numRequests; }
 
     ForwardMemData &operator =(const ForwardMemData &src);
 
-    void resize(unsigned int width);
+    //void resize(unsigned int width);
 
     void bubbleFill();
 
     static ForwardMemData bubble() { return ForwardMemData(); }
     bool isBubble() const;
+
+    unsigned int validEntries() const;
 
     bool containsExecSeqNum(ThreadID tid, InstSeqNum seq_num) const;
 };

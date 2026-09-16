@@ -18,6 +18,31 @@ InstOrderData::reportData(std::ostream &os) const
         os << ' ' << seq_num;
 }
 
+unsigned int
+ForwardResultData::validEntries() const
+{
+    unsigned int count = 0;
+
+    for (unsigned int i = 0; i < MAX_FORWARD_INSTS; ++i) {
+        if (results[i].inst && !results[i].inst->isBubble())
+            ++count;
+    }
+
+    return count;
+}
+
+unsigned int
+ForwardMemData::validEntries() const
+{
+    unsigned int count = 0;
+
+    for (unsigned int i = 0; i < MAX_FORWARD_INSTS; ++i) {
+        if (requests[i])
+            ++count;
+    }
+    return count;
+}
+
 ExecRequest::ExecRequest(Execute &execute_, CClassDynInstPtr inst_,
     bool is_load, uint8_t *store_data, unsigned int size, uint64_t *res_) :
     execute(execute_),
@@ -210,14 +235,14 @@ ForwardInstData::resize(unsigned int width)
     bubbleFill();
 }
 
-ForwardResultData::ForwardResultData(unsigned int width, ThreadID tid) :
-    numResults(width), threadId(tid)
+ForwardResultData::ForwardResultData(ThreadID tid) :
+    /*numResults(width)*/ threadId(tid)
 {
     bubbleFill();
 }
 
 ForwardResultData::ForwardResultData(const ExecResult &result_, ThreadID tid) :
-    numResults(1), threadId(tid)
+    /*numResults(1)*/ threadId(tid)
 {
     bubbleFill();
     results[0] = result_;
@@ -231,16 +256,20 @@ ForwardResultData::ForwardResultData(const ForwardResultData &src)
 ForwardResultData &
 ForwardResultData::operator =(const ForwardResultData &src)
 {
-    numResults = src.numResults;
+    if (this == &src)
+        return *this;
+
+    bubbleFill();
     threadId = src.threadId;
 
-    for (unsigned int i = 0; i < src.numResults; i++) {
+    for (unsigned int i = 0; i < MAX_FORWARD_INSTS; i++) {
         results[i] = src.results[i];
     }
 
     return *this;
 }
 
+/*
 void
 ForwardResultData::resize(unsigned int width)
 {
@@ -249,11 +278,11 @@ ForwardResultData::resize(unsigned int width)
 
     bubbleFill();
 }
-
+*/
 void
 ForwardResultData::bubbleFill()
 {
-    for (unsigned int i = 0; i < numResults; i++) {
+    for (unsigned int i = 0; i < MAX_FORWARD_INSTS; i++) {
         results[i] = ExecResult();
     }
 }
@@ -261,8 +290,7 @@ ForwardResultData::bubbleFill()
 bool
 ForwardResultData::isBubble() const
 {
-    return numResults == 0 || !results[0].inst ||
-        results[0].inst->isBubble();
+    return validEntries() == 0;
 }
 
 bool
@@ -271,13 +299,18 @@ ForwardResultData::containsExecSeqNum(ThreadID tid, InstSeqNum seq_num) const
     if (threadId != InvalidThreadID && threadId != tid)
         return false;
 
-    for (unsigned int i = 0; i < width(); i++) {
+    unsigned int seen = 0;
+    unsigned int entries = validEntries();
+
+    for (unsigned int i = 0; i < MAX_FORWARD_INSTS && seen < entries; i++) {
         CClassDynInstPtr inst = results[i].inst;
-        if (inst && !inst->isBubble() &&
-            inst->id.threadId == tid &&
-            inst->id.execSeqNum == seq_num)
-        {
-            return true;
+        if (inst && !inst->isBubble()) {
+            seen++;
+            if (inst->id.threadId == tid &&
+                inst->id.execSeqNum == seq_num)
+            {
+                return true;
+            }
         }
     }
 
@@ -290,16 +323,21 @@ ForwardResultData::forwardRegResult(ThreadID tid, InstSeqNum seq_num,const RegId
     if (threadId != InvalidThreadID && threadId != tid)
         return NULL;
 
-    for (unsigned int i = 0; i < width(); i++) {
+    unsigned int seen = 0;
+    unsigned int entries = validEntries();
+
+    for (unsigned int i = 0; i < MAX_FORWARD_INSTS && seen < entries; i++) {
         CClassDynInstPtr inst = results[i].inst;
-        if (inst && !inst->isBubble() &&
-            inst->id.threadId == tid &&/* tid stuff I haven't seen yet!*/
-            inst->id.execSeqNum == seq_num)
-        {
-            for(auto &write : results[i].writes){
-                if(write.reg == reg)
-                    return write.val;
-                
+        if (inst && !inst->isBubble()) {
+            seen++;
+            if (inst->id.threadId == tid &&
+                inst->id.execSeqNum == seq_num)
+            {
+                for(auto &write : results[i].writes){
+                    if(write.reg == reg)
+                        return write.val;
+                    
+                }
             }
         }
     }
@@ -307,14 +345,14 @@ ForwardResultData::forwardRegResult(ThreadID tid, InstSeqNum seq_num,const RegId
     return NULL;
 }
 
-ForwardMemData::ForwardMemData(unsigned int width, ThreadID tid) :
-    numRequests(width), threadId(tid)
+ForwardMemData::ForwardMemData(ThreadID tid) :
+    /*numRequests(width)*/ threadId(tid)
 {
     bubbleFill();
 }
 
 ForwardMemData::ForwardMemData(ExecRequestPtr request_, ThreadID tid) :
-    numRequests(1), threadId(tid)
+    /*numRequests(1)*/ threadId(tid)
 {
     bubbleFill();
     requests[0] = request_;
@@ -328,16 +366,19 @@ ForwardMemData::ForwardMemData(const ForwardMemData &src)
 ForwardMemData &
 ForwardMemData::operator =(const ForwardMemData &src)
 {
-    numRequests = src.numRequests;
+    if (this == &src)
+        return *this;
+
+    bubbleFill();
     threadId = src.threadId;
 
-    for (unsigned int i = 0; i < src.numRequests; i++) {
+    for (unsigned int i = 0; i < MAX_FORWARD_INSTS; i++) {
         requests[i] = src.requests[i];
     }
 
     return *this;
 }
-
+/*
 void
 ForwardMemData::resize(unsigned int width)
 {
@@ -346,11 +387,12 @@ ForwardMemData::resize(unsigned int width)
 
     bubbleFill();
 }
+*/
 
 void
 ForwardMemData::bubbleFill()
 {
-    for (unsigned int i = 0; i < numRequests; i++) {
+    for (unsigned int i = 0; i < MAX_FORWARD_INSTS; i++) {
         requests[i] = nullptr;
     }
 }
@@ -358,7 +400,7 @@ ForwardMemData::bubbleFill()
 bool
 ForwardMemData::isBubble() const
 {
-    return numRequests == 0 || !requests[0];
+    return validEntries() == 0;
 }
 
 /* Not needed for forwardMemdata, it was done previously for older pipe.
@@ -369,7 +411,7 @@ ForwardMemData::containsExecSeqNum(ThreadID tid, InstSeqNum seq_num) const
     if (threadId != InvalidThreadID && threadId != tid)
         return false;
 
-    for (unsigned int i = 0; i < width(); i++) {
+    for (unsigned int i = 0; i < MAX_FORWARD_INSTS; i++) {
         ExecRequestPtr request = requests[i];
         CClassDynInstPtr inst = request ? request->inst : nullptr;
         if (inst && !inst->isBubble() &&

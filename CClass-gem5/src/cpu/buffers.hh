@@ -551,6 +551,193 @@ class InputBuffer : public Reservable
     }
 };
 
+/** Input buffer whose capacity and reservations count payload elements. not the underlying class */
+template <typename ElemType,
+    typename ReportTraits = ReportTraitsAdaptor<ElemType>,
+    typename BubbleTraits = BubbleTraitsAdaptor<ElemType> >
+class InstructionInputBuffer :
+    public Reservable
+{
+  protected:
+    //mutable Queue<ElemType, ReportTraits, BubbleTraits> queue;
+    std::deque<ElemType> queue;
+
+    mutable ElemType *elementPtr;
+    mutable unsigned pendingEntries;
+    unsigned capacityEntries;
+    unsigned occupiedEntries;
+    unsigned reservedEntries;
+
+    /*required by any class that is templated to implement validEntries()*/
+
+    static unsigned
+    entryCount(const ElemType &element)
+    {
+        return element.validEntries();
+    }
+
+  public:
+    InstructionInputBuffer(const std::string &name,
+        const std::string &data_name, unsigned int capacity_) :
+        elementPtr(NULL),
+        pendingEntries(0),
+        capacityEntries(capacity_),
+        occupiedEntries(0),
+        reservedEntries(0)
+    { }
+
+    bool
+    empty() const
+    {
+        return !elementPtr && queue.empty();
+    }
+
+    const ElemType &
+    front() const
+    {
+        return elementPtr ? *elementPtr : queue.front();
+    }
+
+    ElemType &
+    front()
+    {
+        return elementPtr ? *elementPtr : queue.front();
+    }
+
+    bool
+    canReserve() const override
+    {   
+        return occupiedEntries + reservedEntries < capacityEntries;
+       
+    }
+
+    void
+    reserve() override
+    {   
+        assert(canReserve());
+        reservedEntries++;
+    }
+
+    void
+    freeReservation() override
+    {
+        if (reservedEntries != 0)
+            reservedEntries--;
+    }
+
+    void
+    setTail(ElemType &new_element)
+    {
+        /* push tail should have emptied the elementptr if it existed*/
+        assert(!elementPtr);
+
+        unsigned entries = entryCount(new_element);
+        if (entries == 0)
+            return;
+
+        if (reservedEntries >= entries)
+            assert(occupiedEntries + reservedEntries <= capacityEntries);
+        else
+            assert(occupiedEntries + entries <= capacityEntries);
+
+        if (queue.empty()) {
+            elementPtr = &new_element;
+            pendingEntries = entries;
+        } else {
+            push(new_element);
+            consumeAfterQueuePush(entries);
+        }
+
+        occupiedEntries += entries;
+    }
+
+    void
+    pushTail()
+    {
+        if (elementPtr) {
+            push(*elementPtr);
+            consumeAfterQueuePush(pendingEntries);
+            elementPtr = NULL;
+            pendingEntries = 0;
+        }
+    }
+
+    void
+    pop()
+    {
+        if (elementPtr) {
+            consumePendingReservation(pendingEntries);
+            elementPtr = NULL;
+            assert(occupiedEntries >= pendingEntries);
+            occupiedEntries -= pendingEntries;
+            pendingEntries = 0;
+        } else if (!queue.empty()) {
+            unsigned entries = entryCount(queue.front());
+            queue.pop_front();
+            assert(occupiedEntries >= entries);
+            occupiedEntries -= entries;
+        }
+    }
+
+    unsigned int
+    unreservedRemainingSpace() const
+    {
+        int remaining = capacityEntries -
+            (occupiedEntries + reservedEntries);
+        return remaining < 0 ? 0 : remaining;
+    }
+
+    unsigned int instructionOccupancy() const { return occupiedEntries; }
+    unsigned int instructionCapacity() const { return capacityEntries; }
+
+  protected:
+    void
+    consumeAfterQueuePush(unsigned entries)
+    {
+        if (entries > reservedEntries)
+            entries = reservedEntries;
+        reservedEntries -= entries;
+    }
+
+    void
+    consumePendingReservation(unsigned entries)
+    {
+        if (entries > reservedEntries)
+            entries = reservedEntries;
+        reservedEntries -= entries;
+    }
+
+    void
+    push(ElemType &data)
+    {
+        if (!BubbleTraits::isBubble(data)) {
+            freeReservation();
+            queue.push_back(data);
+
+            if (queue.size() > capacityEntries) {
+                warn("%s: No space to push data into queue of capacity"
+                    " %u, pushing anyway\n", name(), capacityEntries);
+            }
+
+        }
+    }
+    public:
+    const std::deque<ElemType>& getQueue() const
+    {   
+        if(!queue.empty())
+            return queue;
+
+        if (elementPtr) {
+            static thread_local std::deque<ElemType> elementQueue;
+            elementQueue.clear();
+            elementQueue.push_back(*elementPtr);
+            return elementQueue;
+        }
+
+        return queue;
+    }
+};
+
 } // namespace cclass
 } // namespace gem5
 

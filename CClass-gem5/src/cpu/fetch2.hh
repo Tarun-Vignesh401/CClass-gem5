@@ -56,6 +56,13 @@ namespace gem5
 
         ThreadID threadPriority;
 
+        struct Fetch2ThreadInfo
+        {
+            bool blocked = false;
+        };
+
+        std::vector<Fetch2ThreadInfo> fetch2Info;
+
         std::vector<InstSeqNum> streamSeqNum;
         std::vector<InstSeqNum> predictionSeqNum;
         //I don't need it right now let's see if I need it later.

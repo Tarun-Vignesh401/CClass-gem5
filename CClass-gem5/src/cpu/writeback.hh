@@ -25,9 +25,9 @@ class Writeback : public Named
     Latch<InstOrderData>::Output in_order;
 
   public:
-    std::vector<InputBuffer<ForwardResultData>> inputBuffer_COMMON;
-    std::vector<InputBuffer<ForwardResultData>> inputBuffer_TRAP;
-    InputBuffer<InstOrderData> inputBuffer_ORDER;
+    std::vector<InstructionInputBuffer<ForwardResultData>> inputBuffer_COMMON;
+    std::vector<InstructionInputBuffer<ForwardResultData>> inputBuffer_TRAP;
+    InstructionInputBuffer<InstOrderData> inputBuffer_ORDER;
 
     Writeback(const std::string &name_, CClassCPU &cpu_,
         const BaseCClassCPUParams &params,
@@ -50,6 +50,10 @@ class Writeback : public Named
     ForwardResultData *getCommonInput(ThreadID tid);
     ForwardResultData *getTrapInput(ThreadID tid);
     InstOrderData *getOrderInput();
+
+    void popCommonInput(ThreadID tid);
+    void popTrapInput(ThreadID tid);
+    void popOrderInput();
 
     unsigned int writebackWidth; 
 

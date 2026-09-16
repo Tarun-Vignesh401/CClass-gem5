@@ -196,7 +196,9 @@ class CClassDynInst : public RefCounted
 
   public:
     /** The BubbleIF interface. */
-    bool isBubble() const { return id.fetchSeqNum == 0; }
+    /*if decode had decoded the instruction there must be
+    * a exec sequence number*/
+    bool isBubble() const { return id.execSeqNum == 0; }
 
     /** There is a single bubble inst */
     static CClassDynInstPtr bubble() { return bubbleInst; }

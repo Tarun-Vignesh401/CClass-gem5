@@ -37,12 +37,12 @@ class Memory : public Named
     Latch<InstOrderData>::Input out_order;
 
   public:
-    std::vector<InputBuffer<ForwardMemData>> inputBuffer_MEMORY;
-    std::vector<InputBuffer<ForwardResultData>> inputBuffer_BASE;
-    std::vector<InputBuffer<ForwardResultData>> inputBuffer_TRAP;
-    std::vector<InputBuffer<ForwardResultData>> inputBuffer_MBOX;
-    std::vector<InputBuffer<ForwardResultData>> inputBuffer_FBOX;
-    InputBuffer<InstOrderData> inputBuffer_ORDER;
+    std::vector<InstructionInputBuffer<ForwardMemData>> inputBuffer_MEMORY;
+    std::vector<InstructionInputBuffer<ForwardResultData>> inputBuffer_BASE;
+    std::vector<InstructionInputBuffer<ForwardResultData>> inputBuffer_TRAP;
+    std::vector<InstructionInputBuffer<ForwardResultData>> inputBuffer_MBOX;
+    std::vector<InstructionInputBuffer<ForwardResultData>> inputBuffer_FBOX;
+    InstructionInputBuffer<InstOrderData> inputBuffer_ORDER;
 
     Memory(const std::string &name_, CClassCPU &cpu_,
         const BaseCClassCPUParams &params,
@@ -55,24 +55,24 @@ class Memory : public Named
         Latch<ForwardResultData>::Input out_COMMON,
         Latch<ForwardResultData>::Input out_TRAP,
         Latch<InstOrderData>::Input out_order,
-        std::vector<InputBuffer<ForwardResultData>> &nextStageReserve_COMMON,
-        std::vector<InputBuffer<ForwardResultData>> &nextStageReserve_TRAP);
+        std::vector<InstructionInputBuffer<ForwardResultData>> &nextStageReserve_COMMON,
+        std::vector<InstructionInputBuffer<ForwardResultData>> &nextStageReserve_TRAP);
 
     void evaluate();
 
   protected:
-  std::vector<InputBuffer<ForwardResultData>> &nextStageReserve_COMMON;
-  std::vector<InputBuffer<ForwardResultData>> &nextStageReserve_TRAP;
+  std::vector<InstructionInputBuffer<ForwardResultData>> &nextStageReserve_COMMON;
+  std::vector<InstructionInputBuffer<ForwardResultData>> &nextStageReserve_TRAP;
 
     ForwardMemData *getMemInput(ThreadID tid);
 
     ForwardResultData *getInstInput(
-        ThreadID tid, std::vector<InputBuffer<ForwardResultData>> &input_buffer);
+        ThreadID tid, std::vector<InstructionInputBuffer<ForwardResultData>> &input_buffer);
 
     void popMemInput(ThreadID tid);
 
     void popInstInput(
-        ThreadID tid, std::vector<InputBuffer<ForwardResultData>> &input_buffer);
+        ThreadID tid, std::vector<InstructionInputBuffer<ForwardResultData>> &input_buffer);
 
     InstOrderData *getOrderInput();
 

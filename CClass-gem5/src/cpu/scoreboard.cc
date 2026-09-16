@@ -140,9 +140,32 @@ Scoreboard::forwardresult
 Scoreboard::checkExeIsbForId(ThreadID tid, InstSeqNum num)
 {   
     forwardresult result = None;
-    if (!baseBuf[tid].empty() &&
-        baseBuf[tid].front().containsExecSeqNum(tid, num))
-        result = Int;
+
+    if (!baseBuf[tid].empty()){
+        for(const auto& base : baseBuf[tid].getQueue()){
+            if(base.containsExecSeqNum(tid, num)) result = Int;
+        }
+    }
+
+
+    if (!mboxBuf[tid].empty()){
+        for(const auto& mbox : mboxBuf[tid].getQueue()){
+            if(mbox.containsExecSeqNum(tid, num)) result = None;
+        }
+    }
+
+
+    if (!fboxBuf[tid].empty()){
+        for(const auto& fbox : fboxBuf[tid].getQueue()){
+            if(fbox.containsExecSeqNum(tid, num)) result = None;
+        }
+    }
+
+    /*
+    if (!baseBuf[tid].empty()){
+        for(&auto base : baseBuf[tid])
+            if(base.containsExecSeqNum(tid, num)) result = Int;
+    }
 
     if (!mboxBuf[tid].empty() &&
         mboxBuf[tid].front().containsExecSeqNum(tid, num))
@@ -151,6 +174,7 @@ Scoreboard::checkExeIsbForId(ThreadID tid, InstSeqNum num)
     if (!fboxBuf[tid].empty() &&
         fboxBuf[tid].front().containsExecSeqNum(tid, num))
         result = None;
+    */
     /* this shouldn't happen, mem results are unpredictable
     *if (!memBuf[tid].empty() &&
     *    memBuf[tid].front().containsExecSeqNum(tid, num))
@@ -217,10 +241,14 @@ Scoreboard::canInstIssue(CClassDynInstPtr inst,ThreadContext *thread_context)
 
 RegVal
 Scoreboard::forwardRegResult(ThreadID tid, InstSeqNum num, const RegId &reg){
-        
-    RegVal val = baseBuf[tid].front().forwardRegResult(tid, num, reg);
+    if (!baseBuf[tid].empty()) {
+        for (const auto &base : baseBuf[tid].getQueue()) {
+            if (base.containsExecSeqNum(tid, num))
+                return base.forwardRegResult(tid, num, reg);
+        }
+    }
 
-    return val;
+    return 0;
 
 }
 
@@ -233,9 +261,13 @@ Scoreboard::lookForForwards(ThreadID tid, const RegId &reg, RegVal& forwarded_va
 
     Index index;
     if( findIndex(reg,index) ){
+        if (rename_id[index] == 0)
+            return false;
         forwardresult result_id = checkExeIsbForId(tid, rename_id[index]);
+        if(result_id != None){
         forwarded_value = forwardRegResult( tid, rename_id[index], reg);
         return true;
+        }
     }
     return false;
 

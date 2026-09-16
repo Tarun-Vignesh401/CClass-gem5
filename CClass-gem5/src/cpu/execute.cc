@@ -51,11 +51,11 @@ Execute::Execute(const std::string &name_, CClassCPU &cpu_,
                  Latch<ForwardResultData>::Input out_TRAP,
                  Latch<ForwardResultData>::Input out_MBOX,
                  Latch<ForwardResultData>::Input out_FBOX,
-                 std::vector<InputBuffer<ForwardResultData>> &nextStageReserve_BASE,
-                 std::vector<InputBuffer<ForwardMemData>> &nextStageReserve_MEMORY,
-                 std::vector<InputBuffer<ForwardResultData>> &nextStageReserve_TRAP,
-                 std::vector<InputBuffer<ForwardResultData>> &nextStageReserve_MBOX,
-                 std::vector<InputBuffer<ForwardResultData>> &nextStageReserve_FBOX,
+                 std::vector<InstructionInputBuffer<ForwardResultData>> &nextStageReserve_BASE,
+                 std::vector<InstructionInputBuffer<ForwardMemData>> &nextStageReserve_MEMORY,
+                 std::vector<InstructionInputBuffer<ForwardResultData>> &nextStageReserve_TRAP,
+                 std::vector<InstructionInputBuffer<ForwardResultData>> &nextStageReserve_MBOX,
+                 std::vector<InstructionInputBuffer<ForwardResultData>> &nextStageReserve_FBOX,
                  Latch<InstOrderData>::Input inst_order_):
       Named(name_),
       inp(inp_),
@@ -165,6 +165,36 @@ Execute::popInput(ThreadID tid)
     executeInfo[tid].inputIndex = 0;
 
 }
+void 
+Execute::SetStalls(ThreadID tid){
+
+    ExecuteThreadInfo &thread = executeInfo[tid];
+    if(nextStageReserve_BASE[tid].canReserve())
+        thread.blocked_base = false;
+    else 
+        thread.blocked_base = true;
+
+    if(nextStageReserve_MEMORY[tid].canReserve())
+        thread.blocked_memory = false;
+    else 
+        thread.blocked_memory = true;
+    
+    if(nextStageReserve_TRAP[tid].canReserve())
+        thread.blocked_trap = false;
+    else 
+        thread.blocked_trap = true;
+
+    if(nextStageReserve_MBOX[tid].canReserve())
+        thread.blocked_mbox = false;
+    else 
+        thread.blocked_mbox = true;
+    
+    if(nextStageReserve_FBOX[tid].canReserve())
+        thread.blocked_fbox = false;
+    else 
+        thread.blocked_fbox = true;
+
+}
 
 void 
 Execute::evaluate(){
@@ -179,8 +209,8 @@ Execute::evaluate(){
     BranchData &branch_decode = *out_decode.inputWire;
 
     // for each cycle one issuing thread...
-
     ThreadID issue_tid = getIssuingThread();
+    SetStalls(issue_tid);
     ExecuteThreadInfo& thread = executeInfo[issue_tid];
     resetISBOutputIndexes(issue_tid);
 
@@ -218,8 +248,8 @@ Execute::evaluate(){
       
     }
     }// for loop ends..
-    issue(issue_tid);
-
+    unsigned int num_issued = issue(issue_tid);
+    
     std::vector<CClassDynInstPtr> next_issuable_insts;
 
     for (ThreadID tid = 0; tid < cpu.numThreads; tid++) {
@@ -235,7 +265,6 @@ Execute::evaluate(){
     }
 
     trytoPush(issue_tid);
-    //displayseqnums();
 
 
     // evaluating if we have to tick again or not..
@@ -251,6 +280,7 @@ Execute::evaluate(){
         }
 
     }
+    
     /*bool need_to_tick = num_issued != 0 || !becoming_stalled || can_issue_next;
 
     if(!need_to_tick){
@@ -277,34 +307,11 @@ Execute::getInput(ThreadID tid){
         return NULL;
     } 
 }
-/* fill the execseqnums for each forwardinstdata from the decode stage 
-* maybe change it to somewhere else, maybe after popInput? no need to repeat this.*/
-void
-Execute::FillSequence(const ForwardInstData *inst){
-    InstOrderData &order = *inst_order.inputWire;
-
-    assert(order.isBubble());
-
-    if (!inst)
-        return;
-
-    for(unsigned int i = 0; i < inst->width() ;i++){
-        if (inst->insts[i] && !inst->insts[i]->isBubble())
-            order.push_back(inst->insts[i]->id.execSeqNum);
-    }
-}
-
 unsigned int
 Execute::issue(ThreadID thread_id)
 {
     ExecuteThreadInfo &thread = executeInfo[thread_id];
     const ForwardInstData *insts_in = getInput(thread_id);
-    /* filling sequence numbers at the earliest as soon as decode gives 
-    * data out*/
-    if(!thread.inst_order_filled){
-        FillSequence(insts_in);
-        thread.inst_order_filled = true;
-    }
 
     /* Early termination if we have no instructions */
     if (!insts_in)
@@ -563,14 +570,7 @@ Execute::issue(ThreadID thread_id)
 
         /* Got to the end of a line */
         if (thread.inputIndex == insts_in->width()) {
-            /*we have to fill the sequence numbers once 
-            * we get the packet from decode not after we 
-            * finish issuing them?*/
-            //FillSequence(insts_in);
             popInput(thread_id);
-            /* have to reset the inst_order for the new
-            * forwardlinedata */
-            thread.inst_order_filled = false;
             /* Set insts_in to null to force us to leave the surrounding
              *  loop */
             insts_in = NULL;
@@ -593,6 +593,8 @@ Execute::trytoPush(ThreadID tid){
     if (thread.inFlightInsts.empty())
         return;
 
+    /*there might be an issue limit, but here no isb pushing limit
+    enforced push as much as possible at every cycle */
     for (auto it = thread.inFlightInsts.begin();
         it != thread.inFlightInsts.end(); )
     {
@@ -611,7 +613,7 @@ Execute::trytoPush(ThreadID tid){
                 it = thread.inFlightInsts.erase(it);
                 continue;
             }
-
+            /*no need to stall any functional units here*/
             ++it;
             continue;
         }
@@ -636,11 +638,6 @@ Execute::trytoPush(ThreadID tid){
                 handleBranch(tid, inst);
             // control instruction handling...
             if (inst->isMemRef()) {
-                if (!out_MEMORY.inputWire->isBubble()) {
-                    ++it;
-                    continue;
-                }
-
                 auto request_key = std::make_pair(tid, inst->id.execSeqNum);
                 ExecRequestPtr mem_request;
                 auto request_it = pendingMemRequests.find(request_key);
@@ -648,6 +645,10 @@ Execute::trytoPush(ThreadID tid){
                 if (request_it != pendingMemRequests.end()) {
                     mem_request = request_it->second;
                 } else {
+                    if(thread.blocked_memory){
+                    /* do not execute a request until the isb is free.
+                    * if I allow this to happen even if blocked the for loop will make
+                    *multiple same requests to the cache */
                     Fault fault = initiateMemAccess(inst, mem_request);
                     if (fault != NoFault) {
                         inst->fault = fault;
@@ -657,6 +658,7 @@ Execute::trytoPush(ThreadID tid){
 
                     if (mem_request)
                         pendingMemRequests[request_key] = mem_request;
+                    }
                 }
                 //fault created while making a memory request to the dcache
                 if (inst->fault != NoFault) {
@@ -668,6 +670,7 @@ Execute::trytoPush(ThreadID tid){
                         it = thread.inFlightInsts.erase(it);
                         continue;
                     }
+                    /* no stalling fu's for faults*/
                 } // mem request failed 
                 else if (mem_request && mem_request->failed()) {
                     inst->fault = mem_request->fault;
@@ -679,6 +682,7 @@ Execute::trytoPush(ThreadID tid){
                         it = thread.inFlightInsts.erase(it);
                         continue;
                     }
+                  
                 } else if (mem_request &&
                     (mem_request->sent() || mem_request->complete()))
                 {
@@ -688,6 +692,8 @@ Execute::trytoPush(ThreadID tid){
                         it = thread.inFlightInsts.erase(it);
                         continue;
                     }
+                    else 
+                        fu->stalled = true;
                 } else if (mem_request) {
                     DPRINTF(CClassExecute,
                         "Memory request not ready for memory ISB yet: "
@@ -696,6 +702,7 @@ Execute::trytoPush(ThreadID tid){
                 }
             }// mem inst handling..
             else {
+                if( findIsbifFree(tid,inst) ){
                 /*normal instruction execution and fault capture*/
                 ExecResult result;
                 result.inst = inst;
@@ -712,6 +719,10 @@ Execute::trytoPush(ThreadID tid){
                 fu->stalled = false;
                 it = thread.inFlightInsts.erase(it);
                 continue;
+            }
+            else{
+                fu->stalled = true;
+            }
             }// any other instruction handling...
         } else if (fu->stalled) {
             DPRINTF(CClassExecute,
@@ -754,13 +765,37 @@ Execute::cleanupInFlightInsts(ThreadID tid)
 void
 Execute::resetISBOutputIndexes(ThreadID tid)
 {
+    /* no need to wait until it goes out of bounds we are pushing variable
+    * payloads in a cycle*/
     ExecuteThreadInfo &thread = executeInfo[tid];
+        thread.baseOutputIndex = 0;
+        thread.memoryOutputIndex = 0;
+        thread.trapOutputIndex = 0;
+        thread.mboxOutputIndex = 0;
+        thread.fboxOutputIndex = 0;
+}
+bool 
+Execute::findIsbifFree(ThreadID tid, CClassDynInstPtr inst){
+     ExecuteThreadInfo &thread = executeInfo[tid];
 
-    thread.baseOutputIndex = 0;
-    thread.memoryOutputIndex = 0;
-    thread.trapOutputIndex = 0;
-    thread.mboxOutputIndex = 0;
-    thread.fboxOutputIndex = 0;
+    OpClass op_class = inst->staticInst->opClass();
+
+    if ((op_class == enums::IntMult || op_class == enums::IntDiv) && !thread.blocked_mbox) {
+        return true;
+    } else if (inst->staticInst->isFloating() && !thread.blocked_fbox) {
+        return true;
+    }
+    else if(inst->fault != NoFault && !thread.blocked_trap) 
+    {
+        return true;
+    }
+    else if(!thread.blocked_base)
+    {
+        return true;
+    }
+    else
+        return false;
+
 }
 
 bool
@@ -771,48 +806,48 @@ Execute::pushInstToLatch(ThreadID tid, const ExecResult &result)
     Latch<ForwardResultData>::Input *out = &out_BASE;
     unsigned int *output_index = &thread.baseOutputIndex;
 
-    if (inst->isFault()) {
+    OpClass op_class = inst->staticInst->opClass();
+
+    if ((op_class == enums::IntMult || op_class == enums::IntDiv) && !thread.blocked_mbox) {
+        out = &out_MBOX;
+        output_index = &thread.mboxOutputIndex;
+        nextStageReserve_MBOX[tid].reserve();
+    } else if (inst->staticInst->isFloating() && !thread.blocked_fbox) {
+        out = &out_FBOX;
+        output_index = &thread.fboxOutputIndex;
+        nextStageReserve_FBOX[tid].reserve();
+    }
+    else if(inst->fault != NoFault && !thread.blocked_trap) 
+    {
         out = &out_TRAP;
         output_index = &thread.trapOutputIndex;
         nextStageReserve_TRAP[tid].reserve();
-    } else if (inst->isInst()) {
-        OpClass op_class = inst->staticInst->opClass();
-
-        if (op_class == enums::IntMult || op_class == enums::IntDiv) {
-            out = &out_MBOX;
-            output_index = &thread.mboxOutputIndex;
-            nextStageReserve_MBOX[tid].reserve();
-        } else if (inst->staticInst->isFloating() ||
-                   inst->staticInst->isVector()) {
-            out = &out_FBOX;
-            output_index = &thread.fboxOutputIndex;
-            nextStageReserve_FBOX[tid].reserve();
-        }
-        else
-            nextStageReserve_BASE[tid].reserve();
     }
+    else if(!thread.blocked_base)
+    {
+        nextStageReserve_BASE[tid].reserve();
+    }
+    else/* none of the isb's are free so no writing into latches or reserving*/
+        return false; 
+    
 
     ForwardResultData &insts_out = *out->inputWire;
-    unsigned int width = thread.instsBeingCommitted.width();
 
-    if (insts_out.isBubble()) {
-        /* I don't know if this is correct or not? this has not been done
-        * in minor we are not supposed to fill it with empty result objects 
-        * it pollutes the latches*/
-        //insts_out = ForwardResultData(width, tid);
-        //insts_out.threadId = tid;
+    if (*output_index >= MAX_FORWARD_INSTS)
         return false;
-    }
 
-    if (*output_index < insts_out.width()) {
-        insts_out.results[*output_index] = result;
-        DPRINTF(CClassExecute, "Pushed inst %s to ISB slot %u\n",
-            *inst, *output_index);
-        (*output_index)++;
-        return true;
-    }
+    ExecResult &slot = insts_out.results[*output_index];
+    if (slot.inst && !slot.inst->isBubble())
+        return false;
 
-    return false;
+    insts_out.threadId = tid;
+    slot = result;
+    inst_order.inputWire->push_back(inst->id.execSeqNum);
+    DPRINTF(CClassExecute, "Pushed inst %s to ISB slot %u\n",
+        *inst, *output_index);
+    (*output_index)++;
+    return true;
+
 }
 
 bool
@@ -821,21 +856,18 @@ Execute::pushMemReqToLatch(ThreadID tid, ExecRequestPtr request)
     ExecuteThreadInfo &thread = executeInfo[tid];
     ForwardMemData &mem_out = *out_MEMORY.inputWire;
 
-    if (mem_out.isBubble()) {
-        /* I don't know if this is correct or not? this has not been done
-        * in minor we are not supposed to fill it with empty result objects 
-        * it pollutes the latches*/
-       // unsigned int width = thread.instsBeingCommitted.width();
-       // mem_out = ForwardMemData(width, tid);
-       //mem_out.threadId = tid;
-       return false;
-    }
-
-    if (thread.memoryOutputIndex >= mem_out.width())
+    if (thread.memoryOutputIndex >= MAX_FORWARD_INSTS)
+        return false;
+    
+    if(thread.blocked_memory)/* you can't push into isb its full*/
         return false;
 
+    if (mem_out.requests[thread.memoryOutputIndex])
+        return false;
+
+    mem_out.threadId = tid;
     mem_out.requests[thread.memoryOutputIndex] = request;
-    nextStageReserve_MEMORY[tid].reserve();
+    inst_order.inputWire->push_back(request->inst->id.execSeqNum);
     thread.memoryOutputIndex++;
 
     DPRINTF(CClassExecute,

@@ -42,11 +42,11 @@ class Execute : public Named
     Latch<ForwardResultData>::Input out_FBOX;
 
 
-    std::vector<InputBuffer<ForwardResultData>> &nextStageReserve_BASE;
-    std::vector<InputBuffer<ForwardMemData>> &nextStageReserve_MEMORY;
-    std::vector<InputBuffer<ForwardResultData>> &nextStageReserve_TRAP;
-    std::vector<InputBuffer<ForwardResultData>> &nextStageReserve_MBOX;
-    std::vector<InputBuffer<ForwardResultData>> &nextStageReserve_FBOX;
+    std::vector<InstructionInputBuffer<ForwardResultData>> &nextStageReserve_BASE;
+    std::vector<InstructionInputBuffer<ForwardMemData>> &nextStageReserve_MEMORY;
+    std::vector<InstructionInputBuffer<ForwardResultData>> &nextStageReserve_TRAP;
+    std::vector<InstructionInputBuffer<ForwardResultData>> &nextStageReserve_MBOX;
+    std::vector<InstructionInputBuffer<ForwardResultData>> &nextStageReserve_FBOX;
 
     Latch<InstOrderData>::Input inst_order;
 
@@ -119,7 +119,11 @@ class Execute : public Named
             trapOutputIndex(other.trapOutputIndex),
             mboxOutputIndex(other.mboxOutputIndex),
             fboxOutputIndex(other.fboxOutputIndex),
-            inst_order_filled(other.inst_order_filled),
+            blocked_base(false),
+            blocked_memory(false),
+            blocked_trap(false),
+            blocked_mbox(false),
+            blocked_fbox(false),
             instsBeingCommitted(other.instsBeingCommitted),
             streamSeqNum(other.streamSeqNum),
             lastPredictionSeqNum(other.lastPredictionSeqNum),
@@ -141,9 +145,13 @@ class Execute : public Named
         unsigned int trapOutputIndex;
         unsigned int mboxOutputIndex;
         unsigned int fboxOutputIndex;
-        
-        bool inst_order_filled = false;
 
+        bool blocked_base;
+        bool blocked_memory;
+        bool blocked_trap;
+        bool blocked_mbox;
+        bool blocked_fbox;
+        
          /** Structure for reporting insts currently being processed/retired
          *  for MinorTrace */
         ForwardInstData instsBeingCommitted;
@@ -158,6 +166,8 @@ class Execute : public Named
 
         /** State progression for draining NotDraining -> ... -> DrainAllInsts */
         DrainState drainState;
+
+
     };
     // all of this is to observe the state of execute..
 
@@ -173,6 +183,8 @@ class Execute : public Named
      *  is no data. */
     const ForwardInstData *getInput(ThreadID tid);
 
+    bool findIsbifFree(ThreadID tid, CClassDynInstPtr inst);
+
      /** Pop an element off the input buffer, if there are any */
     void popInput(ThreadID tid);
 
@@ -186,6 +198,8 @@ class Execute : public Named
     void updateBranchData(ThreadID tid, BranchData::Reason reason, CClassDynInstPtr inst, const PCStateBase &target, BranchData &branch);
 
     void handleBranch(ThreadID tid, CClassDynInstPtr inst);
+
+    void SetStalls(ThreadID tid);
 
 
     //void issuedMemBarrierInst(CClassDynInstPtr inst);
@@ -201,8 +215,6 @@ class Execute : public Named
     void cleanupInFlightInsts(ThreadID tid);
 
     void resetISBOutputIndexes(ThreadID tid);
-
-    void FillSequence(const ForwardInstData *inst);
 
     bool pushInstToLatch(ThreadID tid, const ExecResult &result);
 
@@ -251,11 +263,11 @@ class Execute : public Named
                  Latch<ForwardResultData>::Input out_TRAP,
                  Latch<ForwardResultData>::Input out_MBOX,
                  Latch<ForwardResultData>::Input out_FBOX,
-                 std::vector<InputBuffer<ForwardResultData>> &nextStageReserve_BASE,
-                 std::vector<InputBuffer<ForwardMemData>> &nextStageReserve_MEMORY,
-                 std::vector<InputBuffer<ForwardResultData>> &nextStageReserve_TRAP,
-                 std::vector<InputBuffer<ForwardResultData>> &nextStageReserve_MBOX,
-                 std::vector<InputBuffer<ForwardResultData>> &nextStageReserve_FBOX,
+                 std::vector<InstructionInputBuffer<ForwardResultData>> &nextStageReserve_BASE,
+                 std::vector<InstructionInputBuffer<ForwardMemData>> &nextStageReserve_MEMORY,
+                 std::vector<InstructionInputBuffer<ForwardResultData>> &nextStageReserve_TRAP,
+                 std::vector<InstructionInputBuffer<ForwardResultData>> &nextStageReserve_MBOX,
+                 std::vector<InstructionInputBuffer<ForwardResultData>> &nextStageReserve_FBOX,
                  Latch<InstOrderData>::Input inst_order_);
 
     ~Execute();

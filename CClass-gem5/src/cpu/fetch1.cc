@@ -58,7 +58,7 @@ namespace gem5
         const BranchData &branch = *inp.outputWire;
 
         if (branch.isBubble()){
-            std::cout<< "latch is bubble !\n";
+            //std::cout<< "latch is bubble !\n";
             return false;
         }
         DPRINTF(CClassFetch1, "Fetch1 saw branch data: %s\n", branch);

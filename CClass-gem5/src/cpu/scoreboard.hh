@@ -79,9 +79,9 @@ class Scoreboard : public Named
   public:
     Scoreboard(const std::string &name,
     const BaseISA::RegClasses &reg_classes,
-    const std::vector<InputBuffer<ForwardResultData>> &base_buf,
-    const std::vector<InputBuffer<ForwardResultData>> &mbox_buf,
-    const std::vector<InputBuffer<ForwardResultData>> &fbox_buf) :
+    const std::vector<InstructionInputBuffer<ForwardResultData>> &base_buf,
+    const std::vector<InstructionInputBuffer<ForwardResultData>> &mbox_buf,
+    const std::vector<InstructionInputBuffer<ForwardResultData>> &fbox_buf) :
     Named(name),
     regClasses(reg_classes),
     intRegOffset(0),
@@ -133,9 +133,9 @@ class Scoreboard : public Named
     //void minorTrace() const;
 
     private:
-    const std::vector<InputBuffer<ForwardResultData>> &baseBuf;
-    const std::vector<InputBuffer<ForwardResultData>> &mboxBuf;
-    const std::vector<InputBuffer<ForwardResultData>> &fboxBuf;
+    const std::vector<InstructionInputBuffer<ForwardResultData>> &baseBuf;
+    const std::vector<InstructionInputBuffer<ForwardResultData>> &mboxBuf;
+    const std::vector<InstructionInputBuffer<ForwardResultData>> &fboxBuf;
 };
 
 } // namespace cclass

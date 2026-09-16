@@ -62,25 +62,46 @@ Writeback::getOrderInput()
 }
 
 void
+Writeback::popCommonInput(ThreadID tid)
+{
+    if (!inputBuffer_COMMON[tid].empty())
+        inputBuffer_COMMON[tid].pop();
+}
+
+void
+Writeback::popTrapInput(ThreadID tid)
+{
+    if (!inputBuffer_TRAP[tid].empty())
+        inputBuffer_TRAP[tid].pop();
+}
+
+void
+Writeback::popOrderInput()
+{
+    if (!inputBuffer_ORDER.empty())
+        inputBuffer_ORDER.pop();
+}
+
+void
 Writeback::resetConsumedInputs(ThreadID tid)
 {
     WritebackThreadInfo &thread = writebackInfo[tid];
 
     ForwardResultData *common = getCommonInput(tid);
-    if (common && thread.commonInputIndex >= common->width()) {
-        inputBuffer_COMMON[tid].pop();
+    if (common && thread.commonInputIndex >= common->validEntries()) {
+        popCommonInput(tid);
         thread.commonInputIndex = 0;
     }
 
     ForwardResultData *trap = getTrapInput(tid);
-    if (trap && thread.trapInputIndex >= trap->width()) {
-        inputBuffer_TRAP[tid].pop();
+    if (trap && thread.trapInputIndex >= trap->validEntries()) {
+        popTrapInput(tid);
         thread.trapInputIndex = 0;
     }
 
     InstOrderData *order = getOrderInput();
-    if (order && thread.orderIndex >= order->width()) {
-        inputBuffer_ORDER.pop();
+    if (order && thread.orderIndex >= order->validEntries()) {
+        popOrderInput();
         thread.orderIndex = 0;
     }
 }
@@ -98,18 +119,16 @@ Writeback::evaluate()
         inputBuffer_ORDER.setTail(*in_order.outputWire);
     
     unsigned int num_issued = 0;
-    DPRINTF(CClassWriteBack, "inside the main loop\n");
-
 
     ThreadID tid = 0;
     WritebackThreadInfo &thread = writebackInfo[tid];
     InstOrderData *order = getOrderInput();
 
-    while (order && thread.orderIndex < order->width() && num_issued < writebackWidth) {
+    while (order && thread.orderIndex < order->validEntries() && num_issued < writebackWidth) {
         InstSeqNum inst_num = order->seqNums[thread.orderIndex];
         bool moved = false;
         ForwardResultData *common = getCommonInput(tid);
-        if (common && thread.commonInputIndex < common->width()) {
+        if (!moved && common && thread.commonInputIndex < common->validEntries()) {
             ExecResult &result = common->results[thread.commonInputIndex];
             CClassDynInstPtr inst = result.inst;
 
@@ -130,7 +149,7 @@ Writeback::evaluate()
         }
 
         ForwardResultData *trap = getTrapInput(tid);
-        if (!moved && trap && thread.trapInputIndex < trap->width()) {
+        if (!moved && trap && thread.trapInputIndex < trap->validEntries()) {
             ExecResult &result = trap->results[thread.trapInputIndex];
             CClassDynInstPtr inst = result.inst;
 
@@ -148,11 +167,29 @@ Writeback::evaluate()
         }
 
         if (!moved)
+        {
+            DPRINTF(CClassWriteBack,
+                    "ORDER BLOCKED: expected=%llu common=%llu trap=%llu "
+                    "orderIndex=%u orderWidth=%u\n",
+                    inst_num,
+                    common && common->validEntries() ?
+                        common->results[thread.commonInputIndex].inst->id.execSeqNum : 0,
+                    trap && trap->validEntries() ?
+                        trap->results[thread.trapInputIndex].inst->id.execSeqNum : 0,
+                    thread.orderIndex, order->validEntries());
             break;
-
-        resetConsumedInputs(tid);
-        order = getOrderInput();
+        }
+        num_issued++;
+        //resetConsumedInputs(tid);
+       // order = getOrderInput();
+        DPRINTF(CClassWriteBack,
+        "WB progress: commonIndex=%u trapIndex=%u orderIndex=%u\n",
+        thread.commonInputIndex,
+        thread.trapInputIndex,
+        thread.orderIndex);
     }
+    resetConsumedInputs(tid);
+    //order = getOrderInput();
 
     if (!in_COMMON.outputWire->isBubble())
         inputBuffer_COMMON[in_COMMON.outputWire->threadId].pushTail();
