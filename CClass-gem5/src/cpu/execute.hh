@@ -124,6 +124,7 @@ class Execute : public Named
             blocked_trap(false),
             blocked_mbox(false),
             blocked_fbox(false),
+            inst_order_filled(other.inst_order_filled),
             instsBeingCommitted(other.instsBeingCommitted),
             streamSeqNum(other.streamSeqNum),
             lastPredictionSeqNum(other.lastPredictionSeqNum),
@@ -152,6 +153,8 @@ class Execute : public Named
         bool blocked_mbox;
         bool blocked_fbox;
         
+        bool inst_order_filled = false;
+
          /** Structure for reporting insts currently being processed/retired
          *  for MinorTrace */
         ForwardInstData instsBeingCommitted;
@@ -215,6 +218,8 @@ class Execute : public Named
     void cleanupInFlightInsts(ThreadID tid);
 
     void resetISBOutputIndexes(ThreadID tid);
+
+    bool FillSequence(const ForwardInstData *inst);
 
     bool pushInstToLatch(ThreadID tid, const ExecResult &result);
 

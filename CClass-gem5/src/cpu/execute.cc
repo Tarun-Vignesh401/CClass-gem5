@@ -307,11 +307,40 @@ Execute::getInput(ThreadID tid){
         return NULL;
     } 
 }
+/* fill the execseqnums for each forwardinstdata from the decode stage 
+* maybe change it to somewhere else, maybe after popInput? no need to repeat this.*/
+bool
+Execute::FillSequence(const ForwardInstData *inst){
+    InstOrderData &order = *inst_order.inputWire;
+    bool filled = false;
+    assert(order.isBubble());
+
+    if (!inst)
+        return filled;
+
+    for(unsigned int i = 0; i < inst->width() ;i++){
+        if (inst->insts[i] && !inst->insts[i]->isBubble()){
+            order.push_back(inst->insts[i]->id.execSeqNum);
+            filled = true;
+        }
+        else{
+        filled = false;
+        break;
+        }
+    }
+    return filled;
+}
+
 unsigned int
 Execute::issue(ThreadID thread_id)
 {
     ExecuteThreadInfo &thread = executeInfo[thread_id];
     const ForwardInstData *insts_in = getInput(thread_id);
+    /* filling sequence numbers at the earliest as soon as decode gives 
+    * data out*/
+    if(!thread.inst_order_filled){
+       thread.inst_order_filled =  FillSequence(insts_in);;
+    }
 
     /* Early termination if we have no instructions */
     if (!insts_in)
@@ -570,7 +599,14 @@ Execute::issue(ThreadID thread_id)
 
         /* Got to the end of a line */
         if (thread.inputIndex == insts_in->width()) {
+            /*we have to fill the sequence numbers once 
+            * we get the packet from decode not after we 
+            * finish issuing them?*/
+            //FillSequence(insts_in);
             popInput(thread_id);
+            /* have to reset the inst_order for the new
+            * forwardlinedata */
+            thread.inst_order_filled = false;
             /* Set insts_in to null to force us to leave the surrounding
              *  loop */
             insts_in = NULL;
@@ -645,7 +681,7 @@ Execute::trytoPush(ThreadID tid){
                 if (request_it != pendingMemRequests.end()) {
                     mem_request = request_it->second;
                 } else {
-                    if(thread.blocked_memory){
+                    if(!thread.blocked_memory){
                     /* do not execute a request until the isb is free.
                     * if I allow this to happen even if blocked the for loop will make
                     *multiple same requests to the cache */
@@ -811,21 +847,25 @@ Execute::pushInstToLatch(ThreadID tid, const ExecResult &result)
     if ((op_class == enums::IntMult || op_class == enums::IntDiv) && !thread.blocked_mbox) {
         out = &out_MBOX;
         output_index = &thread.mboxOutputIndex;
-        nextStageReserve_MBOX[tid].reserve();
+        if(!out->inputWire->isBubble())
+            nextStageReserve_MBOX[tid].reserve();
     } else if (inst->staticInst->isFloating() && !thread.blocked_fbox) {
         out = &out_FBOX;
         output_index = &thread.fboxOutputIndex;
-        nextStageReserve_FBOX[tid].reserve();
+        if(!out->inputWire->isBubble())
+            nextStageReserve_FBOX[tid].reserve();
     }
     else if(inst->fault != NoFault && !thread.blocked_trap) 
     {
         out = &out_TRAP;
         output_index = &thread.trapOutputIndex;
-        nextStageReserve_TRAP[tid].reserve();
+        if(!out->inputWire->isBubble())
+            nextStageReserve_TRAP[tid].reserve();
     }
     else if(!thread.blocked_base)
-    {
-        nextStageReserve_BASE[tid].reserve();
+    {   
+        if(!out->inputWire->isBubble())
+            nextStageReserve_BASE[tid].reserve();
     }
     else/* none of the isb's are free so no writing into latches or reserving*/
         return false; 
@@ -842,7 +882,6 @@ Execute::pushInstToLatch(ThreadID tid, const ExecResult &result)
 
     insts_out.threadId = tid;
     slot = result;
-    inst_order.inputWire->push_back(inst->id.execSeqNum);
     DPRINTF(CClassExecute, "Pushed inst %s to ISB slot %u\n",
         *inst, *output_index);
     (*output_index)++;
@@ -867,7 +906,6 @@ Execute::pushMemReqToLatch(ThreadID tid, ExecRequestPtr request)
 
     mem_out.threadId = tid;
     mem_out.requests[thread.memoryOutputIndex] = request;
-    inst_order.inputWire->push_back(request->inst->id.execSeqNum);
     thread.memoryOutputIndex++;
 
     DPRINTF(CClassExecute,
