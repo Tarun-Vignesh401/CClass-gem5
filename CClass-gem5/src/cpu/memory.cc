@@ -16,6 +16,7 @@ Memory::Memory(const std::string &name_, CClassCPU &cpu_,
     Latch<ForwardResultData>::Output in_MBOX_,
     Latch<ForwardResultData>::Output in_FBOX_,
     Latch<InstOrderData>::Output in_order_,
+    Latch<instorder_pop>::Output in_instorder_pop_,
     Latch<ForwardResultData>::Input out_COMMON_,
     Latch<ForwardResultData>::Input out_TRAP_,
     Latch<InstOrderData>::Input out_order_,
@@ -29,29 +30,31 @@ Memory::Memory(const std::string &name_, CClassCPU &cpu_,
     in_MBOX(in_MBOX_),
     in_FBOX(in_FBOX_),
     in_order(in_order_),
+    in_instorder_pop(in_instorder_pop_),
     out_COMMON(out_COMMON_),
     out_TRAP(out_TRAP_),
     out_order(out_order_),
-    inputBuffer_ORDER(name_ + ".inputBuffer_ORDER", "inst_order",
-        params.executeInputBufferSize * MAX_FORWARD_INSTS),
+    inputBuffer_ORDER(name_ + ".inputBuffer_ORDER",
+        params.numFUIDs),
     nextStageReserve_COMMON(nextStageReserve_COMMON_),
     nextStageReserve_TRAP(nextStageReserve_TRAP_),
     memoryIssueLimit(params.memoryIssueLimit),
-    memoryInfo(params.numThreads)
+    memoryInfo(params.numThreads),
+    pop_info(false,0)
 {
     for (ThreadID tid = 0; tid < params.numThreads; tid++) {
         const std::string tid_str = std::to_string(tid);
 
         inputBuffer_BASE.emplace_back(name_ + ".inputBuffer_BASE" + tid_str,
-            "base_reqs", params.executeInputBufferSize);
+            params.executeInputBufferSize);
         inputBuffer_TRAP.emplace_back(name_ + ".inputBuffer_TRAP" + tid_str,
-            "trap_reqs", params.executeInputBufferSize);
+            params.executeInputBufferSize);
         inputBuffer_MBOX.emplace_back(name_ + ".inputBuffer_MBOX" + tid_str,
-            "mbox_reqs", params.executeInputBufferSize);
+            params.executeInputBufferSize);
         inputBuffer_FBOX.emplace_back(name_ + ".inputBuffer_FBOX" + tid_str,
-            "fbox_reqs", params.executeInputBufferSize);
+            params.executeInputBufferSize);
         inputBuffer_MEMORY.emplace_back(name_ + ".inputBuffer_MEMORY" + tid_str,
-            "mem_reqs", params.executeInputBufferSize);
+            params.executeInputBufferSize);
     }
 }
 
@@ -191,6 +194,8 @@ Memory::resetConsumedInputs(ThreadID tid)
     ForwardResultData *base = getInstInput(tid, inputBuffer_BASE);
     if (base && thread.baseInputIndex >= base->validEntries()) {
         popInstInput(tid, inputBuffer_BASE);
+        DPRINTF(CClassMemory,"Popped memory\n");
+        inputBuffer_BASE[tid].DebugPrint();
         thread.baseInputIndex = 0;
     }
 
@@ -258,6 +263,17 @@ Memory::evaluate()
 
     ThreadID tid = 0;
     MemoryThreadInfo &thread = memoryInfo[tid];
+    if(!in_instorder_pop.outputWire->isBubble())
+            pop_info = *in_instorder_pop.outputWire;
+    /*   
+    if (pop_info.pop) {
+        InstOrderData *front = getOrderInput();
+        DPRINTF(CClassMemory, "the order number is : %d\n",pop_info.num);
+        if (front && front->seqNums[thread.order_index] == pop_info.num) {
+            popOrderInput();
+            thread.order_index = 0;
+        }
+    }*/
     thread.commonOutputIndex = 0;
     thread.trapOutputIndex = 0;
     ForwardResultData *inst_base = getInstInput(tid, inputBuffer_BASE);
@@ -274,6 +290,7 @@ Memory::evaluate()
         InstSeqNum inst_num = order->seqNums[thread.order_index];
         bool found = false;
         bool moved = false;
+        DPRINTF(CClassMemory,"Currently polling seq num : %d\n", inst_num);
 
         if (inst_base) {
                 ExecResult &result = inst_base->results[thread.baseInputIndex];
@@ -411,7 +428,7 @@ Memory::evaluate()
     resetConsumedInputs(tid);
 
     *out_order.inputWire = issued_order;
-
+    /*
     if (!in_BASE.outputWire->isBubble())
         inputBuffer_BASE[in_BASE.outputWire->threadId].pushTail();
     if (!in_TRAP.outputWire->isBubble())
@@ -424,7 +441,7 @@ Memory::evaluate()
         inputBuffer_MEMORY[in_MEMORY.outputWire->threadId].pushTail();
     if (!in_order.outputWire->isBubble())
         inputBuffer_ORDER.pushTail();
-
+    */
 }
 
 

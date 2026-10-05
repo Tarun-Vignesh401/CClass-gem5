@@ -54,6 +54,7 @@ class Pipeline : public Ticked
     Latch<ForwardResultData> eToMBOX;
     Latch<ForwardResultData> eToFBOX;
     Latch<InstOrderData> instOrder;
+    Latch<instorder_pop> instOrderPop;
     Latch<ForwardResultData> mToCOMMON;
     Latch<ForwardMemData> mToCOMMON_MEM;
     Latch<ForwardResultData> mToTRAP;

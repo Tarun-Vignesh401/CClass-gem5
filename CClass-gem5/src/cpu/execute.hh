@@ -47,8 +47,10 @@ class Execute : public Named
     std::vector<InstructionInputBuffer<ForwardResultData>> &nextStageReserve_TRAP;
     std::vector<InstructionInputBuffer<ForwardResultData>> &nextStageReserve_MBOX;
     std::vector<InstructionInputBuffer<ForwardResultData>> &nextStageReserve_FBOX;
+    InstructionInputBuffer<InstOrderData> &nextStageReserve_ORDER;
 
     Latch<InstOrderData>::Input inst_order;
+    Latch<instorder_pop>::Input out_instorder_pop;
 
     CClassCPU &cpu;
 
@@ -200,7 +202,7 @@ class Execute : public Named
      *  if that is a stream-changing branch update the streamSeqNum */
     void updateBranchData(ThreadID tid, BranchData::Reason reason, CClassDynInstPtr inst, const PCStateBase &target, BranchData &branch);
 
-    void handleBranch(ThreadID tid, CClassDynInstPtr inst);
+    bool handleBranch(ThreadID tid, CClassDynInstPtr inst);
 
     void SetStalls(ThreadID tid);
 
@@ -273,7 +275,9 @@ class Execute : public Named
                  std::vector<InstructionInputBuffer<ForwardResultData>> &nextStageReserve_TRAP,
                  std::vector<InstructionInputBuffer<ForwardResultData>> &nextStageReserve_MBOX,
                  std::vector<InstructionInputBuffer<ForwardResultData>> &nextStageReserve_FBOX,
-                 Latch<InstOrderData>::Input inst_order_);
+                 InstructionInputBuffer<InstOrderData> &nextStageReserve_ORDER,
+                 Latch<InstOrderData>::Input inst_order_,
+                 Latch<instorder_pop>::Input out_instorder_pop_);
 
     ~Execute();
 

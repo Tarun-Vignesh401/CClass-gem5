@@ -264,7 +264,17 @@ class ForwardLineData{
 /** Maximum number of instructions that can be carried by the pipeline. */
 const unsigned int MAX_FORWARD_INSTS = 4;
 
+struct instorder_pop {
+    bool pop;
+    InstSeqNum num;
 
+    instorder_pop(bool pop_ = false, InstSeqNum num_ = 0) :
+        pop(pop_), num(num_)
+    { }
+
+    static instorder_pop bubble() { return instorder_pop(); }
+    bool isBubble() const { return !pop; }
+};
 
 class ForwardInstData /* : public ReportIF, public BubbleIF */
 {

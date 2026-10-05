@@ -19,8 +19,8 @@ Writeback::Writeback(const std::string &name_, CClassCPU &cpu_,
     in_COMMON(in_COMMON_),
     in_TRAP(in_TRAP_),
     in_order(in_order_),
-    inputBuffer_ORDER(name_ + ".inputBuffer_ORDER", "inst_order",
-        params.executeInputBufferSize),
+    inputBuffer_ORDER(name_ + ".inputBuffer_ORDER",
+        params.numFUIDs),
     writebackInfo(params.numThreads),
     writebackWidth(params.writebackWidth)
 {
@@ -28,9 +28,9 @@ Writeback::Writeback(const std::string &name_, CClassCPU &cpu_,
         const std::string tid_str = std::to_string(tid);
 
         inputBuffer_COMMON.emplace_back(name_ + ".inputBuffer_COMMON" + tid_str,
-            "common_results", params.executeInputBufferSize);
+           params.executeInputBufferSize);
         inputBuffer_TRAP.emplace_back(name_ + ".inputBuffer_TRAP" + tid_str,
-            "trap_results", params.executeInputBufferSize);
+            params.executeInputBufferSize);
     }
 }
 
@@ -127,7 +127,7 @@ Writeback::evaluate()
     ThreadID tid = 0;
     WritebackThreadInfo &thread = writebackInfo[tid];
     InstOrderData *order = getOrderInput();
-
+    /*
     DPRINTF(CClassWriteBack,
     "WB loop check: order=%p orderIndex=%u orderEntries=%u "
     "numIssued=%u width=%u bufferEmpty=%d\n",
@@ -137,6 +137,7 @@ Writeback::evaluate()
     num_issued,
     writebackWidth,
     inputBuffer_ORDER.empty());
+    */
     
     while (order && thread.orderIndex < order->validEntries() && num_issued < writebackWidth) {
         InstSeqNum inst_num = order->seqNums[thread.orderIndex];
@@ -153,9 +154,11 @@ Writeback::evaluate()
                     result.commit(*cpu.threads[inst->id.threadId]);
 
                 DPRINTF(CClassWriteBack,
-                    "Writeback committed common execSeq=%llu fault=%d\n",
-                    inst->id.execSeqNum, inst->fault != NoFault);
-
+                "Committing inst=%s pc=%#lx pcState=%s execSeq=%llu\n",
+                *inst,
+                inst->pc->instAddr(),
+                *inst->pc,
+                inst->id.execSeqNum);
                 thread.commonInputIndex++;
                 thread.orderIndex++;
                 moved = true;
@@ -196,11 +199,11 @@ Writeback::evaluate()
         num_issued++;
         resetConsumedInputs(tid);
         //order = getOrderInput();
-        DPRINTF(CClassWriteBack,
-        "WB progress: commonIndex=%u trapIndex=%u orderIndex=%u\n",
-        thread.commonInputIndex,
-        thread.trapInputIndex,
-        thread.orderIndex);
+        //DPRINTF(CClassWriteBack,
+        //"WB progress: commonIndex=%u trapIndex=%u orderIndex=%u\n",
+        //thread.commonInputIndex,
+        //thread.trapInputIndex,
+        //thread.orderIndex);
     }
 
     if (!in_COMMON.outputWire->isBubble())

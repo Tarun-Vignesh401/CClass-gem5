@@ -31,6 +31,7 @@ class Memory : public Named
     Latch<ForwardResultData>::Output in_MBOX;
     Latch<ForwardResultData>::Output in_FBOX;
     Latch<InstOrderData>::Output in_order;
+    Latch<instorder_pop>::Output in_instorder_pop;
 
     Latch<ForwardResultData>::Input out_COMMON;
     Latch<ForwardResultData>::Input out_TRAP;
@@ -52,6 +53,7 @@ class Memory : public Named
         Latch<ForwardResultData>::Output in_MBOX,
         Latch<ForwardResultData>::Output in_FBOX,
         Latch<InstOrderData>::Output in_order,
+        Latch<instorder_pop>::Output in_instorder_pop,
         Latch<ForwardResultData>::Input out_COMMON,
         Latch<ForwardResultData>::Input out_TRAP,
         Latch<InstOrderData>::Input out_order,
@@ -111,6 +113,8 @@ class Memory : public Named
       }
     };
     std::vector<MemoryThreadInfo> memoryInfo;
+
+    instorder_pop pop_info;
 };
 
 } // namespace cclass

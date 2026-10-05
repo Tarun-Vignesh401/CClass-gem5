@@ -7,6 +7,8 @@
 #include "cpu/cclass/buffers.hh"
 #include "cpu/cclass/pipe_data.hh"
 #include "params/BaseCClassCPU.hh"
+#include "enums/OpClass.hh"
+#include <sstream>
 
 namespace gem5
 {
@@ -58,6 +60,8 @@ class Writeback : public Named
     unsigned int writebackWidth; 
 
     void resetConsumedInputs(ThreadID tid);
+      
+    static std::string formatCommitTrace(const CClassDynInstPtr &inst, const ExecResult &result);
 };
 
 } // namespace cclass

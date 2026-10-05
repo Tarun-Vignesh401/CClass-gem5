@@ -56,7 +56,9 @@ Execute::Execute(const std::string &name_, CClassCPU &cpu_,
                  std::vector<InstructionInputBuffer<ForwardResultData>> &nextStageReserve_TRAP,
                  std::vector<InstructionInputBuffer<ForwardResultData>> &nextStageReserve_MBOX,
                  std::vector<InstructionInputBuffer<ForwardResultData>> &nextStageReserve_FBOX,
-                 Latch<InstOrderData>::Input inst_order_):
+                 InstructionInputBuffer<InstOrderData> &nextStageReserve_ORDER,
+                 Latch<InstOrderData>::Input inst_order_,
+                 Latch<instorder_pop>::Input out_instorder_pop_):
       Named(name_),
       inp(inp_),
       out_fetch1(out_fetch1),
@@ -72,7 +74,9 @@ Execute::Execute(const std::string &name_, CClassCPU &cpu_,
       nextStageReserve_TRAP(nextStageReserve_TRAP),
       nextStageReserve_MBOX(nextStageReserve_MBOX),
       nextStageReserve_FBOX(nextStageReserve_FBOX),
+      nextStageReserve_ORDER(nextStageReserve_ORDER),
       inst_order(inst_order_),
+      out_instorder_pop(out_instorder_pop_),
       cpu(cpu_),
       stalled(false),
       memoryIssueLimit(params.executeMemoryIssueLimit),
@@ -204,13 +208,18 @@ Execute::evaluate(){
         inputBuffer[inp.outputWire->threadId].setTail(*inp.outputWire);
 
 
-    BranchData &branch_fetch1 = *out_fetch1.inputWire;
-    BranchData &branch_fetch2 = *out_fetch2.inputWire;
-    BranchData &branch_decode = *out_decode.inputWire;
+   // BranchData &branch_fetch1 = *out_fetch1.inputWire;
+   // BranchData &branch_fetch2 = *out_fetch2.inputWire;
+   // BranchData &branch_decode = *out_decode.inputWire;
+
+    /* only send out a non bubble value only if a branch is handled*/
+    *out_fetch1.inputWire = BranchData::bubble();
+    *out_fetch2.inputWire = BranchData::bubble();
+    *out_decode.inputWire = BranchData::bubble();
 
     // for each cycle one issuing thread...
     ThreadID issue_tid = getIssuingThread();
-    SetStalls(issue_tid);
+    //SetStalls(issue_tid);
     ExecuteThreadInfo& thread = executeInfo[issue_tid];
     resetISBOutputIndexes(issue_tid);
 
@@ -220,13 +229,15 @@ Execute::evaluate(){
         
         if(thread.drainState != NotDraining){
              if(thread.drainState == DrainHaltFetch){
+                /* handlebranch takes care of that now, no need for 
+                branchdata and stuff
                 updateBranchData(issue_tid,BranchData::HaltFetch,
                 CClassDynInst::bubble(),cpu.getContext(issue_tid)->pcState(),branch_fetch1);
                 updateBranchData(issue_tid,BranchData::HaltFetch,
                 CClassDynInst::bubble(),cpu.getContext(issue_tid)->pcState(),branch_fetch2);
                 updateBranchData(issue_tid,BranchData::HaltFetch,
                 CClassDynInst::bubble(),cpu.getContext(issue_tid)->pcState(),branch_decode);
-                
+                */
                 cpu.wakeupOnEvent(Pipeline::ExecuteStageId);
                 setDrainState(issue_tid,DrainAllInsts);
 
@@ -237,6 +248,7 @@ Execute::evaluate(){
                     popInput(issue_tid);
                 }
                 fu->advance();
+                thread.drainState = NotDraining;
             }
         }
         else {
@@ -263,8 +275,9 @@ Execute::evaluate(){
             }
         }
     }
-
     trytoPush(issue_tid);
+    SetStalls(issue_tid);
+
 
 
     // evaluating if we have to tick again or not..
@@ -312,23 +325,28 @@ Execute::getInput(ThreadID tid){
 bool
 Execute::FillSequence(const ForwardInstData *inst){
     InstOrderData &order = *inst_order.inputWire;
-    bool filled = false;
     assert(order.isBubble());
 
     if (!inst)
-        return filled;
+        return false;
 
-    for(unsigned int i = 0; i < inst->width() ;i++){
-        if (inst->insts[i] && !inst->insts[i]->isBubble()){
-            order.push_back(inst->insts[i]->id.execSeqNum);
-            filled = true;
-        }
-        else{
-        filled = false;
-        break;
+    unsigned int num_seq_nums = 0;
+    for (unsigned int i = 0; i < inst->width(); i++) {
+        if (inst->insts[i] && !inst->insts[i]->isBubble())
+            num_seq_nums++;
+    }
+
+    if (nextStageReserve_ORDER.unreservedRemainingSpace() < num_seq_nums)
+        return false;
+
+    for (unsigned int i = 0; i < inst->width(); i++) {
+        if (inst->insts[i] && !inst->insts[i]->isBubble()) {
+            order.seqNums.push_back(inst->insts[i]->id.execSeqNum);
+            nextStageReserve_ORDER.reserve();
         }
     }
-    return filled;
+
+    return true;
 }
 
 unsigned int
@@ -336,15 +354,18 @@ Execute::issue(ThreadID thread_id)
 {
     ExecuteThreadInfo &thread = executeInfo[thread_id];
     const ForwardInstData *insts_in = getInput(thread_id);
-    /* filling sequence numbers at the earliest as soon as decode gives 
-    * data out*/
-    if(!thread.inst_order_filled){
-       thread.inst_order_filled =  FillSequence(insts_in);;
-    }
+    
 
     /* Early termination if we have no instructions */
     if (!insts_in)
         return 0;
+    
+    /* filling sequence numbers at the earliest as soon as decode gives 
+    * data out
+    if((!thread.inst_order_filled) && insts_in->insts[thread.inputIndex]->id.streamSeqNum == thread.streamSeqNum){
+       thread.inst_order_filled =  FillSequence(insts_in);;
+    }
+    */
 
     /* Start from the first FU */
     unsigned int fu_index = 0;
@@ -524,11 +545,12 @@ Execute::issue(ThreadID thread_id)
                             }
                             /* Also queue this instruction in the memory ref
                              * queue to ensure in-order issue to the memory stage
-                             * for multiple mem requests in flight*/
+                             * for multiple mem requests in flight.
+                             *  I don't think this is needed, order is maintained!*/
 
-                            DPRINTF(CClassExecute, "Pushing mem inst: %s\n",
+                            DPRINTF(CClassExecute, "mem inst is issued into FU: %s\n",
                                 *inst);
-                            thread.inFUMemInsts->push(fu_inst);
+                            //thread.inFUMemInsts->push(fu_inst);
                         }
 
                         /* Update the # of insts. issued per OpClass type */
@@ -568,7 +590,7 @@ Execute::issue(ThreadID thread_id)
              if (debug::CClassTrace && !inst->isBubble()) {
                 inst->cclassTraceInst(*this);
             }*/
-
+               
             /* Mark up barriers */
             if (!discarded && inst->isInst() &&
                 inst->staticInst->isFullMemBarrier())
@@ -596,13 +618,19 @@ Execute::issue(ThreadID thread_id)
             DPRINTF(CClassExecute, "Stepping to next inst inputIndex: %d\n",
                 thread.inputIndex);
         }
+         /* filling sequence numbers at the earliest as soon as decode gives 
+        * data out*/
+        //if((issued && !discarded && !thread.inst_order_filled) && insts_in->insts[thread.inputIndex]->id.streamSeqNum == thread.streamSeqNum){
+        //thread.inst_order_filled =  FillSequence(insts_in);
+        //}
 
         /* Got to the end of a line */
         if (thread.inputIndex == insts_in->width()) {
             /*we have to fill the sequence numbers once 
             * we get the packet from decode not after we 
             * finish issuing them?*/
-            //FillSequence(insts_in);
+            if(inst->id.streamSeqNum == thread.streamSeqNum)
+                FillSequence(insts_in);
             popInput(thread_id);
             /* have to reset the inst_order for the new
             * forwardlinedata */
@@ -670,10 +698,24 @@ Execute::trytoPush(ThreadID tid){
             fu_head.inst->id == inst->id;
 
         if (inst_ready) {
-            if (inst->isInst() && inst->staticInst->isControl())
-                handleBranch(tid, inst);
-            // control instruction handling...
-            if (inst->isMemRef()) {
+        if (inst->isInst() && inst->staticInst->isControl()) {
+            if (!findIsbifFree(tid, inst)) {
+                fu->stalled = true;
+                ++it;
+                continue;
+            }
+
+            if (!handleBranch(tid, inst)) {
+                fu->stalled = true;
+                ++it;
+                continue;
+            }
+
+            fu->stalled = false;
+            it = thread.inFlightInsts.erase(it);
+            continue;
+         }// control instruction handling...
+            else if (inst->isMemRef()) {
                 auto request_key = std::make_pair(tid, inst->id.execSeqNum);
                 ExecRequestPtr mem_request;
                 auto request_it = pendingMemRequests.find(request_key);
@@ -757,6 +799,12 @@ Execute::trytoPush(ThreadID tid){
                 continue;
             }
             else{
+                DPRINTF(CClassExecute,
+                "FU stall: fu=%u front=%s seq=%llu stalled=%d\n",
+                inst->fuIndex,
+                *inst,
+                inst->id.execSeqNum,
+                fu->stalled);
                 fu->stalled = true;
             }
             }// any other instruction handling...
@@ -842,44 +890,65 @@ Execute::pushInstToLatch(ThreadID tid, const ExecResult &result)
     Latch<ForwardResultData>::Input *out = &out_BASE;
     unsigned int *output_index = &thread.baseOutputIndex;
 
+    if(inst->fault != NoFault && !thread.blocked_trap){
+        out = &out_TRAP;
+        output_index = &thread.trapOutputIndex;
+    } 
+    else{
     OpClass op_class = inst->staticInst->opClass();
 
     if ((op_class == enums::IntMult || op_class == enums::IntDiv) && !thread.blocked_mbox) {
         out = &out_MBOX;
         output_index = &thread.mboxOutputIndex;
-        if(!out->inputWire->isBubble())
-            nextStageReserve_MBOX[tid].reserve();
+        //if(!out->inputWire->isBubble())
+            //nextStageReserve_MBOX[tid].reserve();
     } else if (inst->staticInst->isFloating() && !thread.blocked_fbox) {
         out = &out_FBOX;
         output_index = &thread.fboxOutputIndex;
-        if(!out->inputWire->isBubble())
-            nextStageReserve_FBOX[tid].reserve();
-    }
-    else if(inst->fault != NoFault && !thread.blocked_trap) 
-    {
-        out = &out_TRAP;
-        output_index = &thread.trapOutputIndex;
-        if(!out->inputWire->isBubble())
-            nextStageReserve_TRAP[tid].reserve();
+        //if(!out->inputWire->isBubble())
+            //nextStageReserve_FBOX[tid].reserve();
     }
     else if(!thread.blocked_base)
     {   
-        if(!out->inputWire->isBubble())
-            nextStageReserve_BASE[tid].reserve();
+        //if(!out->inputWire->isBubble())
+            //nextStageReserve_BASE[tid].reserve();
     }
     else/* none of the isb's are free so no writing into latches or reserving*/
         return false; 
-    
+    }//main else ends
 
     ForwardResultData &insts_out = *out->inputWire;
 
     if (*output_index >= MAX_FORWARD_INSTS)
         return false;
-
+    /* the split between reservation and the assignment
+    * of the latches are due to the fact only reserve
+    * when the latch is actually free*/
     ExecResult &slot = insts_out.results[*output_index];
     if (slot.inst && !slot.inst->isBubble())
         return false;
 
+    /*reserve the buffers after you write into the latch*/
+    if(inst->fault != NoFault && !thread.blocked_trap) 
+    {
+            nextStageReserve_TRAP[tid].reserve();
+    }
+    else{
+    OpClass op_class = inst->staticInst->opClass();
+    if ((op_class == enums::IntMult || op_class == enums::IntDiv) && !thread.blocked_mbox) {
+    
+            nextStageReserve_MBOX[tid].reserve();
+    } else if (inst->staticInst->isFloating() && !thread.blocked_fbox) {
+      
+     
+            nextStageReserve_FBOX[tid].reserve();
+    }
+ 
+    else if(!thread.blocked_base)
+    {   
+            nextStageReserve_BASE[tid].reserve();
+    }
+    }
     insts_out.threadId = tid;
     slot = result;
     DPRINTF(CClassExecute, "Pushed inst %s to ISB slot %u\n",
@@ -906,6 +975,7 @@ Execute::pushMemReqToLatch(ThreadID tid, ExecRequestPtr request)
 
     mem_out.threadId = tid;
     mem_out.requests[thread.memoryOutputIndex] = request;
+    nextStageReserve_MEMORY[tid].reserve();
     thread.memoryOutputIndex++;
 
     DPRINTF(CClassExecute,
@@ -1067,7 +1137,7 @@ Execute::getIssuingThread()
 }
 
 
-void
+bool
 Execute::handleBranch(ThreadID tid, CClassDynInstPtr inst)
 {   /*branch predictor support to be added*/
     ThreadContext *thread = cpu.getContext(tid);
@@ -1079,11 +1149,14 @@ Execute::handleBranch(ThreadID tid, CClassDynInstPtr inst)
     ExecContext context(cpu, *cpu.threads[tid], this, inst, &result);
     Fault fault = inst->staticInst->execute(&context, inst->traceData);
 
+    if(!pushInstToLatch(tid,result))
+        return false;
+
     if (fault != NoFault) {
         inst->fault = fault;
         DPRINTF(CClassExecute, "Branch execution fault: %s inst: %s\n",
             fault->name(), *inst);
-        return;
+        return false;
     }
 
     const PCStateBase &target = thread->pcState();
@@ -1092,14 +1165,24 @@ Execute::handleBranch(ThreadID tid, CClassDynInstPtr inst)
         BranchData::UnpredictedBranch :
         BranchData::CorrectlyPredictedBranch;
 
+    if (BranchData::isStreamChange(reason)) {
+        *out_instorder_pop.inputWire = instorder_pop(true, inst->id.execSeqNum+1);
+        DPRINTF(CClassExecute, "we have indicated to flush the seqnum: %d\n", inst->id.execSeqNum+1);
+    }
+
     BranchData &branch_fetch1 = *out_fetch1.inputWire;
 
     updateBranchData(tid, reason, inst, target, branch_fetch1);
     *out_fetch2.inputWire = branch_fetch1;
     *out_decode.inputWire = branch_fetch1;
 
+    /*clear out the isb of the execute stage as well*/
+    ExecuteThreadInfo& thread_info = executeInfo[tid];
+    thread_info.drainState =  DrainHaltFetch;
+
     DPRINTF(CClassExecute, "Handled branch inst: %s taken=%d target=%s\n",
         *inst, taken, target);
+    return true;
 }
 
 void

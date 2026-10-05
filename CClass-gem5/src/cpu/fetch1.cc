@@ -39,7 +39,7 @@ namespace gem5
             fetchLimit(params.fetch1FetchLimit),
             fetchInfo(params.numThreads),
             threadPriority(0)
-        {
+       {
         for (auto &info: fetchInfo)
             info.pc.reset(params.isa[0]->newPCState());
 
@@ -52,6 +52,7 @@ namespace gem5
         }
 
     }
+/*
     bool
     Fetch1::checkRedirect(Fetch1ThreadInfo &out_thread)
     {
@@ -80,21 +81,59 @@ namespace gem5
         * Fetch1ThreadInfo, including the pc state from thread
         * context.
         */
-        advancepc(tid);
+        //advancepc(tid);
        
         /*check if the target pc is different from current
         * pc of fetch1?
         */
-        bool pc_changed = !thread.pc ||
+        /*bool pc_changed = !thread.pc ||
             thread.pc->instAddr() != branch.target->instAddr();
+        
 
-        if (pc_changed && nextStageReserve[tid].canReserve()) {
+        if (/*pc_changed&& nextStageReserve[tid].canReserve()) {
             nextStageReserve[tid].reserve();
+            DPRINTF(CClassFetch1, "Processed the pc in the redirect path\n");
             processResponse(out_thread, thread);
         }
+        advancepc(tid);
 
-        return pc_changed;
+        return true;
+        //return pc_changed;
+    }*/
+
+bool
+Fetch1::checkRedirect(Fetch1ThreadInfo &out_thread)
+{
+    const BranchData &branch = *inp.outputWire;
+
+    if (branch.isBubble() || !branch.isStreamChange())
+        return false;
+    
+    DPRINTF(CClassFetch1, "Fetch1 saw branch data: %s\n", branch);
+
+
+    ThreadID tid = branch.threadId;
+    Fetch1ThreadInfo &thread = fetchInfo[tid];
+
+    thread.streamSeqNum = branch.newStreamSeqNum;
+    thread.predictionSeqNum = branch.newPredictionSeqNum;
+
+    // branch.target already has its instAddr at the redirect target.
+    set(thread.pc, *branch.target);
+    thread.FetchAddr = thread.pc->instAddr();
+    thread.state = PCGenRunning;
+    thread.wakeupGuard = true;
+    thread.makeValid();
+    advancepc(tid);
+    thread.blocked = !nextStageReserve[tid].canReserve();
+    if (!thread.blocked) {
+        nextStageReserve[tid].reserve();
+        processResponse(out_thread, thread); // sends target PC once
+        advancepc(tid);                      // private Fetch1 PC -> successor
     }
+
+    return true;
+}
 
     ThreadID Fetch1::getScheduledThread(){
 
@@ -116,6 +155,24 @@ namespace gem5
     assert(thread_ctx != nullptr);
     cpu.wakeupOnEvent(Pipeline::Fetch1StageId);
     }
+
+void
+Fetch1::advancepc(ThreadID tid)
+{
+    Fetch1ThreadInfo &thread = fetchInfo[tid];
+    assert(thread.pc);
+
+    RiscvISA::PCState pc = thread.pc->as<RiscvISA::PCState>();
+    pc.advance();
+
+    set(thread.pc, pc);
+    thread.FetchAddr = thread.pc->instAddr();
+    thread.state = PCGenRunning;
+    thread.wakeupGuard = true;
+    thread.makeValid();
+}
+
+/*
     void 
     Fetch1::advancepc(ThreadID tid){
 
@@ -132,7 +189,7 @@ namespace gem5
         thread.makeValid();
 
     }
-
+*/
 
 /*
 void updateExpectedSeqNums(const BranchData &branch)
@@ -176,9 +233,7 @@ Fetch1::changeStream(const BranchData &branch)
 }
 */
 void Fetch1::evaluate(){
-        //once execute implemented(it is a latch timing involved)
-        //const BranchData &execute_branch = *inp.outputWire;
-
+        
         //once the branchpred is integrated just a wire 
         //const BranchData &branchPred = ;
 
@@ -195,8 +250,7 @@ void Fetch1::evaluate(){
         if(nextStageReserve[tid].canReserve() && fetchInfo[tid].pc){
             nextStageReserve[tid].reserve();
             processResponse(out_thread,fetchInfo[tid]);
-            Fetch1::advancepc(tid);
-
+            advancepc(tid);
         }
         else{
             //DPRINTF(CClassFetch1,"PC generation halted\n");

@@ -18,6 +18,7 @@
 #include "base/types.hh"
 #include "cpu/activity.hh"
 #include "cpu/timebuf.hh"
+#include "debug/CClassMemory.hh"
 
 namespace gem5
 {
@@ -550,8 +551,117 @@ class InputBuffer : public Reservable
         return queue.unreservedRemainingSpace();
     }
 };
+template <typename ElemType,
+    typename ReportTraits = ReportTraitsAdaptor<ElemType>,
+    typename BubbleTraits = BubbleTraitsAdaptor<ElemType> >
+class InstructionInputBuffer : public Reservable
+{
+    protected:
+    std::deque<ElemType> queue;
+    unsigned int capacity;
+    unsigned int reserved;
+    unsigned int occupied;
 
-/** Input buffer whose capacity and reservations count payload elements. not the underlying class */
+    public:
+    InstructionInputBuffer(const std::string &name, unsigned int capacity_) :
+    capacity(capacity_),
+    reserved(0),
+    occupied(0)
+    { }
+
+    InstructionInputBuffer(const std::string &name, const std::string &data_name,
+        unsigned int capacity_) :
+    InstructionInputBuffer(name, capacity_)
+    { }
+
+    void DebugPrint(){
+        DPRINTF(CClassMemory,"reserved : %d, occupied: %d\n",
+        reserved, occupied );
+    }
+    void 
+    reserve() override {
+        assert(canReserve());
+        reserved++;
+    }
+
+    bool 
+    empty() const {
+        return occupied == 0 || queue.empty();
+    }
+
+    bool
+    canReserve() const override {
+        return reserved + occupied < capacity;
+    }
+
+    void
+    freeReservation() override {
+        if(reserved)
+            reserved--;
+    }
+
+    unsigned int 
+    occupy(ElemType& data) {
+        occupied += data.validEntries();
+        return data.validEntries();
+    }
+
+    void
+    push(ElemType &data)
+    {   
+        assert(queue.size() <= capacity);
+        if (!BubbleTraits::isBubble(data)) {
+            unsigned int extra_ent = occupy(data);
+            reserved -= extra_ent;
+            queue.push_back(data);
+        }
+    }
+
+    void 
+    pop() {
+        assert(capacity > 0);
+
+        if(!queue.empty()){
+            unsigned int entries_freed = queue.front().validEntries();
+            queue.pop_front();
+            occupied = occupied - entries_freed;  
+        }
+    }
+
+    unsigned int 
+    unreservedRemainingSpace(){
+        return capacity - occupied - reserved; 
+    }
+    /*name is just for uniformity*/
+    void 
+    setTail(ElemType &data) {
+        assert(occupied < capacity);
+        push(data);
+    }
+
+    void
+    pushTail()
+    { }
+
+    const ElemType&
+    front() const {
+        assert(!queue.empty());
+        return queue.front();
+    }
+
+    ElemType&
+    front() {
+        assert(!queue.empty());
+        return queue.front();
+    }
+
+    const std::deque<ElemType>&
+    getQueue() const {
+        return queue;
+    }
+};
+/*
+
 template <typename ElemType,
     typename ReportTraits = ReportTraitsAdaptor<ElemType>,
     typename BubbleTraits = BubbleTraitsAdaptor<ElemType> >
@@ -568,7 +678,6 @@ class InstructionInputBuffer :
     unsigned occupiedEntries;
     unsigned reservedEntries;
 
-    /*required by any class that is templated to implement validEntries()*/
 
     static unsigned
     entryCount(const ElemType &element)
@@ -628,7 +737,6 @@ class InstructionInputBuffer :
     void
     setTail(ElemType &new_element)
     {
-        /* push tail should have emptied the elementptr if it existed*/
         assert(!elementPtr);
 
         unsigned entries = entryCount(new_element);
@@ -737,7 +845,7 @@ class InstructionInputBuffer :
         return queue;
     }
 };
-
+*/
 } // namespace cclass
 } // namespace gem5
 

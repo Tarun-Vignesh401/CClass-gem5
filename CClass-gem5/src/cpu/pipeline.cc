@@ -47,6 +47,8 @@ Pipeline::Pipeline(CClassCPU &cpu_, const BaseCClassCPUParams &params) :
         params.executeToMemoryForwardDelay),
     instOrder(cpu.name() + ".instOrder", "inst_order",
         params.executeToMemoryForwardDelay),
+    instOrderPop(cpu.name() + ".instOrderPop", "inst_order_pop",
+        params.executeToMemoryForwardDelay),
     mToCOMMON(cpu.name() + ".mToCOMMON", "insts",
         params.executeToMemoryForwardDelay),
     mToCOMMON_MEM(cpu.name() + ".mToCOMMON_MEM", "mem_reqs",
@@ -60,6 +62,7 @@ Pipeline::Pipeline(CClassCPU &cpu_, const BaseCClassCPUParams &params) :
     memory(cpu.name() + ".memory", cpu, params,
         eToBASE.output(), eToMEMORY.output(), eToTRAP.output(),
         eToMBOX.output(), eToFBOX.output(), instOrder.output(),
+        instOrderPop.output(),
         mToCOMMON.input(), mToTRAP.input(),
         memOrder.input(), writeback.inputBuffer_COMMON,
         writeback.inputBuffer_TRAP),
@@ -69,7 +72,8 @@ Pipeline::Pipeline(CClassCPU &cpu_, const BaseCClassCPUParams &params) :
         eToMBOX.input(), eToFBOX.input(), memory.inputBuffer_BASE,
         memory.inputBuffer_MEMORY, memory.inputBuffer_TRAP,
         memory.inputBuffer_MBOX, memory.inputBuffer_FBOX,
-        instOrder.input()),
+        memory.inputBuffer_ORDER,
+        instOrder.input(), instOrderPop.input()),
     decode(cpu.name() + ".decode", cpu, params, eToD.output(),
         f2ToD.output(), dToE.input(), execute.inputBuffer),
     fetch2(cpu.name() + ".fetch2", cpu, params, eToF2.output(), f1ToF2.output(),
@@ -160,6 +164,7 @@ Pipeline::evaluate()
     eToMBOX.evaluate();
     eToFBOX.evaluate();
     instOrder.evaluate();
+    instOrderPop.evaluate();
     mToCOMMON.evaluate();
     mToCOMMON_MEM.evaluate();
     mToTRAP.evaluate();
