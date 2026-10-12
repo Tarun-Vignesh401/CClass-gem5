@@ -24,6 +24,7 @@
 #include "cpu/cclass/dyn_inst.hh"
 #include "cpu/base.hh"
 #include "cpu/simple_thread.hh"
+#include "debug/CClassExecute.hh"
 
 #include "cpu/cclass/dyn_inst.hh"
 #include "arch/generic/mmu.hh"

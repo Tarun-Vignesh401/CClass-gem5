@@ -77,6 +77,7 @@ class Scoreboard : public Named
     std::vector<InstSeqNum> rename_id;
 
   public:
+  /*
     Scoreboard(const std::string &name,
     const BaseISA::RegClasses &reg_classes,
     const std::vector<InstructionInputBuffer<ForwardResultData>> &base_buf,
@@ -91,8 +92,19 @@ class Scoreboard : public Named
     baseBuf(base_buf),
     mboxBuf(mbox_buf),
     fboxBuf(fbox_buf)
-{ }
-
+    { }
+  
+ */
+    Scoreboard( const std::string &name,
+      const BaseISA::RegClasses &reg_classes):
+      Named(name),
+      regClasses(reg_classes),
+      intRegOffset(0),
+      floatRegOffset(intRegOffset + reg_classes.at(IntRegClass)->numRegs()),
+      numRegs(floatRegOffset + reg_classes.at(FloatRegClass)->numRegs()),
+      rename_id(numRegs, 0)
+    {}
+  
   public:
     /** Sets scoreboard_index to the index into numResults of the
      *  given register index.  Returns true if the given register
@@ -126,16 +138,25 @@ class Scoreboard : public Named
     forwardresult checkMemIsbForId(ThreadID tid, InstSeqNum num);
 
     RegVal forwardRegResult(ThreadID tid, InstSeqNum num, const RegId &reg);
+        
+    RegVal forwardMemRegResult(ThreadID tid, InstSeqNum num, const RegId &reg);
       
-    bool lookForForwards(ThreadID tid, const RegId &reg, RegVal& forwarded_value);
+    bool lookForForwards(CClassDynInstPtr &inst, const RegId &reg, RegVal& forwarded_value);
+    
+    void bindBuffersExe(const std::vector<InstructionInputBuffer<ForwardResultData>> *baseBuf,
+    const std::vector<InstructionInputBuffer<ForwardResultData>> *mboxBuf,
+    const std::vector<InstructionInputBuffer<ForwardResultData>> *fboxBuf);
 
+    void bindBuffersMem(const std::vector<InstructionInputBuffer<ForwardResultData>> *memWb);
     /** CClassTraceIF interface  have to figure out*/
     //void minorTrace() const;
 
     private:
-    const std::vector<InstructionInputBuffer<ForwardResultData>> &baseBuf;
-    const std::vector<InstructionInputBuffer<ForwardResultData>> &mboxBuf;
-    const std::vector<InstructionInputBuffer<ForwardResultData>> &fboxBuf;
+    const std::vector<InstructionInputBuffer<ForwardResultData>> *baseBuf = nullptr;
+    const std::vector<InstructionInputBuffer<ForwardResultData>> *mboxBuf = nullptr;
+    const std::vector<InstructionInputBuffer<ForwardResultData>> *fboxBuf = nullptr;
+    const std::vector<InstructionInputBuffer<ForwardResultData>> *memWbBuf = nullptr;
+
 };
 
 } // namespace cclass

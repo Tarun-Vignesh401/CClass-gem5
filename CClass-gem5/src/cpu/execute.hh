@@ -81,8 +81,7 @@ class Execute : public Named
      *  which pass the MinorDynInst::isNoCostInst test */
     unsigned int noCostFUIndex;
 
-    /* for multi threading we have a vector of scoreboards (not necessary here)*/
-    std::vector<Scoreboard> scoreboard;
+    Scoreboard &scoreboard;
 
     std::vector<FUPipeline *> funcUnits;
 
@@ -277,7 +276,8 @@ class Execute : public Named
                  std::vector<InstructionInputBuffer<ForwardResultData>> &nextStageReserve_FBOX,
                  InstructionInputBuffer<InstOrderData> &nextStageReserve_ORDER,
                  Latch<InstOrderData>::Input inst_order_,
-                 Latch<instorder_pop>::Input out_instorder_pop_);
+                 Latch<instorder_pop>::Input out_instorder_pop_,
+                Scoreboard &scoreboard);
 
     ~Execute();
 
@@ -295,7 +295,7 @@ class Execute : public Named
      *  instructions and memory accesses. */
     bool isDrained();
 
-    bool lookForForwards(ThreadID tid, const RegId& reg, RegVal& forwarded_val);
+    bool lookForForwards(CClassDynInstPtr &inst, const RegId& reg, RegVal& forwarded_val);
 
     //unsigned int drain();
 

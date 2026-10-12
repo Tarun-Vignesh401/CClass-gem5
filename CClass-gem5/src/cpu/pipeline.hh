@@ -60,13 +60,14 @@ class Pipeline : public Ticked
     Latch<ForwardResultData> mToTRAP;
     Latch<InstOrderData> memOrder;
 
+    Scoreboard scoreboard;
     Writeback writeback;
     Memory memory;
     Execute execute;
     Decode decode;
     Fetch2 fetch2;
     Fetch1 fetch1;
-
+    
     /** Activity recording for the pipeline.  This is access through the CPU
      *  by the pipeline stages but belongs to the Pipeline as it is the
      *  cleanest place to initialise it */

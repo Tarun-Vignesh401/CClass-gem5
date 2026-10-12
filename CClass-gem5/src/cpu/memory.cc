@@ -20,6 +20,7 @@ Memory::Memory(const std::string &name_, CClassCPU &cpu_,
     Latch<ForwardResultData>::Input out_COMMON_,
     Latch<ForwardResultData>::Input out_TRAP_,
     Latch<InstOrderData>::Input out_order_,
+    Scoreboard &scoreboard_,
     std::vector<InstructionInputBuffer<ForwardResultData>> &nextStageReserve_COMMON_,
     std::vector<InstructionInputBuffer<ForwardResultData>> &nextStageReserve_TRAP_) :
     Named(name_),
@@ -34,6 +35,7 @@ Memory::Memory(const std::string &name_, CClassCPU &cpu_,
     out_COMMON(out_COMMON_),
     out_TRAP(out_TRAP_),
     out_order(out_order_),
+    scoreboard(scoreboard_),
     inputBuffer_ORDER(name_ + ".inputBuffer_ORDER",
         params.numFUIDs),
     nextStageReserve_COMMON(nextStageReserve_COMMON_),
@@ -46,15 +48,15 @@ Memory::Memory(const std::string &name_, CClassCPU &cpu_,
         const std::string tid_str = std::to_string(tid);
 
         inputBuffer_BASE.emplace_back(name_ + ".inputBuffer_BASE" + tid_str,
-            params.executeInputBufferSize);
+            params.memoryInputBufferSize);
         inputBuffer_TRAP.emplace_back(name_ + ".inputBuffer_TRAP" + tid_str,
-            params.executeInputBufferSize);
+            params.memoryInputBufferSize);
         inputBuffer_MBOX.emplace_back(name_ + ".inputBuffer_MBOX" + tid_str,
-            params.executeInputBufferSize);
+            params.memoryInputBufferSize);
         inputBuffer_FBOX.emplace_back(name_ + ".inputBuffer_FBOX" + tid_str,
-            params.executeInputBufferSize);
+            params.memoryInputBufferSize);
         inputBuffer_MEMORY.emplace_back(name_ + ".inputBuffer_MEMORY" + tid_str,
-            params.executeInputBufferSize);
+            params.memoryInputBufferSize);
     }
 }
 
@@ -262,6 +264,8 @@ Memory::evaluate()
    
 
     ThreadID tid = 0;
+    // let's see how it changes by popping in the next cycle
+    resetConsumedInputs(tid);
     MemoryThreadInfo &thread = memoryInfo[tid];
     if(!in_instorder_pop.outputWire->isBubble())
             pop_info = *in_instorder_pop.outputWire;
@@ -299,12 +303,31 @@ Memory::evaluate()
                     inst->id.execSeqNum == inst_num)
                 {
                     found = true;
-                    if (pushCommon(tid, result)) {
-                        nextStageReserve_COMMON[tid].reserve();
-                        moved = true;
-                        thread.baseInputIndex++;
+                    if (inst->id.streamSeqNum != thread.lastStreamSeqNum){
+                        found = false;
+                        /*multi issue you have to make it into both pop and order
+                        *index increment*/
                         thread.order_index++;
-                        thread.commonOutputIndex++;
+                        //popOrderInput();
+                        DPRINTF(CClassMemory,
+                        "Popped instruction %s due to stream mismatch "
+                        "inst stream: %llu, expected stream: %llu\n",
+                        *inst,
+                        inst->id.streamSeqNum,
+                        thread.lastStreamSeqNum); 
+                        scoreboard.clearInstDests(inst);
+                        popInstInput(tid,inputBuffer_BASE);
+                    }
+                    else{
+                        if (pushCommon(tid, result)) {
+                            if(inst->staticInst->isControl())
+                                thread.lastStreamSeqNum = inst->id.streamSeqNum+1;
+                            nextStageReserve_COMMON[tid].reserve();
+                            moved = true;
+                            thread.baseInputIndex++;
+                            thread.order_index++;
+                            thread.commonOutputIndex++;
+                        }
                     }
                 }
         }
@@ -315,13 +338,27 @@ Memory::evaluate()
                 if (inst && !inst->isBubble() &&
                     inst->id.execSeqNum == inst_num)
                 {
-                    found = true;
-                    if (pushTrap(tid, result)) {
-                        nextStageReserve_TRAP[tid].reserve();
-                        moved = true;
-                        thread.trapInputIndex++;
+                    found = true;  
+                    if (inst->id.streamSeqNum != thread.lastStreamSeqNum){
+                        found = false;
                         thread.order_index++;
-                        thread.trapOutputIndex++;
+                        DPRINTF(CClassMemory,
+                        "Popped instruction %s due to stream mismatch "
+                        "inst stream: %llu, expected stream: %llu\n",
+                        *inst,
+                        inst->id.streamSeqNum,
+                        thread.lastStreamSeqNum);
+                        scoreboard.clearInstDests(inst);
+                         popInstInput(tid,inputBuffer_TRAP);
+                    }
+                    else{
+                        if (pushTrap(tid, result)) {
+                            nextStageReserve_TRAP[tid].reserve();
+                            moved = true;
+                            thread.trapInputIndex++;
+                            thread.order_index++;
+                            thread.trapOutputIndex++;
+                        }
                 }
             }
         }
@@ -334,12 +371,26 @@ Memory::evaluate()
                     inst->id.execSeqNum == inst_num)
                 {
                     found = true;
-                    if (pushCommon(tid, result)) {
-                        nextStageReserve_COMMON[tid].reserve();
-                        thread.mboxInputIndex++;
+                    if (inst->id.streamSeqNum != thread.lastStreamSeqNum){
+                        found = false;
                         thread.order_index++;
-                        thread.commonOutputIndex++;
-                        moved = true;
+                        DPRINTF(CClassMemory,
+                        "Popped instruction %s due to stream mismatch "
+                        "inst stream: %llu, expected stream: %llu\n",
+                        *inst,
+                        inst->id.streamSeqNum,
+                        thread.lastStreamSeqNum);
+                        scoreboard.clearInstDests(inst);
+                        popInstInput(tid,inputBuffer_MBOX);
+                    }
+                    else{
+                        if (pushCommon(tid, result)) {
+                            nextStageReserve_COMMON[tid].reserve();
+                            thread.mboxInputIndex++;
+                            thread.order_index++;
+                            thread.commonOutputIndex++;
+                            moved = true;
+                        }
                     }
                 }
         }
@@ -351,13 +402,27 @@ Memory::evaluate()
                     inst->id.execSeqNum == inst_num)
                 {
                     found = true;
-                    if (pushCommon(tid, result)) {
-                        nextStageReserve_COMMON[tid].reserve();
-                        thread.fboxInputIndex++;
+                    if (inst->id.streamSeqNum != thread.lastStreamSeqNum){
+                        found = false;
                         thread.order_index++;
-                        thread.commonOutputIndex++;
-                        moved = true;
+                        DPRINTF(CClassMemory,
+                        "Popped instruction %s due to stream mismatch "
+                        "inst stream: %llu, expected stream: %llu\n",
+                        *inst,
+                        inst->id.streamSeqNum,
+                        thread.lastStreamSeqNum);
+                        scoreboard.clearInstDests(inst);
+                        popInstInput(tid,inputBuffer_FBOX);
                     }
+                    else{
+                        if (pushCommon(tid, result)) {
+                            nextStageReserve_COMMON[tid].reserve();
+                            thread.fboxInputIndex++;
+                            thread.order_index++;
+                            thread.commonOutputIndex++;
+                            moved = true;
+                        }
+                }
                 }
         }
 
@@ -368,6 +433,19 @@ Memory::evaluate()
                     inst->id.execSeqNum == inst_num)
                 {
                     found = true;
+                    if (inst->id.streamSeqNum != thread.lastStreamSeqNum){
+                        found = false;
+                        thread.order_index++;
+                        DPRINTF(CClassMemory,
+                        "Popped instruction %s due to stream mismatch "
+                        "inst stream: %llu, expected stream: %llu\n",
+                        *inst,
+                        inst->id.streamSeqNum,
+                        thread.lastStreamSeqNum);
+                        scoreboard.clearInstDests(inst);
+                        popMemInput(tid);
+                    }
+                    else{
                     /* translation fault check */
                     if (inst->fault != NoFault || request->failed()) {
                         if (request->failed())
@@ -401,6 +479,7 @@ Memory::evaluate()
                             inst->id.execSeqNum, request->state);
                     }
                 }
+                }
         }
 
         DPRINTF(CClassMemory, "We are currently processing the output Index: %d\n",
@@ -425,7 +504,7 @@ Memory::evaluate()
         popOrderInput();
     
     /*Popping Mem-Exe ISB's here and resetting the sequence numbers */
-    resetConsumedInputs(tid);
+    //resetConsumedInputs(tid);
 
     *out_order.inputWire = issued_order;
     /*

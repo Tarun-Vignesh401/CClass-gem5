@@ -35,6 +35,7 @@ class InstId
     static const InstSeqNum firstLineSeqNum = 1;
     static const InstSeqNum firstFetchSeqNum = 1;
     static const InstSeqNum firstExecSeqNum = 1;
+    static const InstSeqNum firstForwardSeqNum = 0;
 
   public:
     /** The thread to which this line/instruction belongs */
@@ -62,15 +63,19 @@ class InstId
      *  post-micro-op decomposed instructions. */
     InstSeqNum execSeqNum;
 
+    InstSeqNum forwardSeqNum;
+
   public:
     /** Very boring default constructor */
     InstId(
         ThreadID thread_id = 0, InstSeqNum stream_seq_num = 0,
         InstSeqNum prediction_seq_num = 0, InstSeqNum line_seq_num = 0,
-        InstSeqNum fetch_seq_num = 0, InstSeqNum exec_seq_num = 0) :
+        InstSeqNum fetch_seq_num = 0, InstSeqNum exec_seq_num = 0, 
+        InstSeqNum forward_seq_num = 0) :
         threadId(thread_id), streamSeqNum(stream_seq_num),
         predictionSeqNum(prediction_seq_num), lineSeqNum(line_seq_num),
-        fetchSeqNum(fetch_seq_num), execSeqNum(exec_seq_num)
+        fetchSeqNum(fetch_seq_num), execSeqNum(exec_seq_num),
+        forwardSeqNum(forward_seq_num)
     { }
 
   public:

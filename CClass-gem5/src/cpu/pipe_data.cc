@@ -211,7 +211,8 @@ ForwardInstData::containsExecSeqNum(ThreadID tid, InstSeqNum seq_num) const
         if (inst && !inst->isBubble() &&
             inst->id.threadId == tid &&
             inst->id.execSeqNum == seq_num)
-        {
+        {   
+            DPRINTF(CClassExecute, "the ExecSeqNum %d is present in exe isb\n", seq_num);
             return true;
         }
     }

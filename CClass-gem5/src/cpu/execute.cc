@@ -58,7 +58,8 @@ Execute::Execute(const std::string &name_, CClassCPU &cpu_,
                  std::vector<InstructionInputBuffer<ForwardResultData>> &nextStageReserve_FBOX,
                  InstructionInputBuffer<InstOrderData> &nextStageReserve_ORDER,
                  Latch<InstOrderData>::Input inst_order_,
-                 Latch<instorder_pop>::Input out_instorder_pop_):
+                 Latch<instorder_pop>::Input out_instorder_pop_,    
+                 Scoreboard &scoreboard_):
       Named(name_),
       inp(inp_),
       out_fetch1(out_fetch1),
@@ -78,6 +79,7 @@ Execute::Execute(const std::string &name_, CClassCPU &cpu_,
       inst_order(inst_order_),
       out_instorder_pop(out_instorder_pop_),
       cpu(cpu_),
+      scoreboard(scoreboard_),
       stalled(false),
       memoryIssueLimit(params.executeMemoryIssueLimit),
       issueLimit(params.executeIssueLimit),
@@ -144,12 +146,6 @@ Execute::Execute(const std::string &name_, CClassCPU &cpu_,
                 params.executeInputBufferSize));
 
         const auto &regClasses = cpu.threads[tid]->getIsaPtr()->regClasses();
-
-        /* Scoreboards */
-        scoreboard.emplace_back(name_ + ".scoreboard" + tid_str, regClasses,
-            nextStageReserve_BASE,
-            nextStageReserve_MBOX,
-            nextStageReserve_FBOX);
 
         /* In-flight instruction records */
         executeInfo[tid].inFlightInsts.reserve(total_slots);
@@ -287,7 +283,7 @@ Execute::evaluate(){
 
         for (auto inst : next_issuable_insts) {
             if (!fu_pipe->stalled && fu_pipe->provides(inst->staticInst->opClass()) &&
-                scoreboard[inst->id.threadId].canInstIssue(inst, cpu.getContext(inst->id.threadId))){
+                scoreboard.canInstIssue(inst, cpu.getContext(inst->id.threadId))){
                 break;
             }
         }
@@ -440,7 +436,7 @@ Execute::issue(ThreadID thread_id)
 
                     /* Mark the destinations for this instruction as
                      *  busy */
-                    scoreboard[thread_id].markupInstDests(inst, cpu.getContext(thread_id));
+                    scoreboard.markupInstDests(inst, cpu.getContext(thread_id));
 
                     DPRINTF(CClassExecute, "Issuing %s to %d\n", inst->id, noCostFUIndex);
                     inst->fuIndex = noCostFUIndex;
@@ -482,10 +478,11 @@ Execute::issue(ThreadID thread_id)
                         DPRINTF(CClassExecute, "Can't issue inst: %s as extra"
                             " decoding is suppressing it\n",
                             *inst);
-                    } else if (!scoreboard[thread_id].canInstIssue(inst, cpu.getContext(thread_id)))
+                    } else if (!scoreboard.canInstIssue(inst, cpu.getContext(thread_id)))
                     {
-                        DPRINTF(CClassExecute, "Can't issue inst: %s yet\n",
-                            *inst);
+
+                        DPRINTF(CClassExecute, "Can't issue inst(scoreboard lock): %s yet, dependent on inst : %d \n",
+                            *inst,scoreboard.execSeqNumToWaitFor(inst,cpu.getContext(thread_id)));
                     } else {
                         /* Can insert the instruction into this FU */
                         DPRINTF(CClassExecute, "Issuing inst: %s"
@@ -520,7 +517,7 @@ Execute::issue(ThreadID thread_id)
                             /* have to see about early issues, for now make it always false*/
                             if (allowEarlyMemIssue) {
                                 inst->instToWaitFor =
-                                    scoreboard[thread_id].execSeqNumToWaitFor(inst,
+                                    scoreboard.execSeqNumToWaitFor(inst,
                                         cpu.getContext(thread_id));
 
                                 /*if (lastMemBarrier(thread_id) >
@@ -567,7 +564,7 @@ Execute::issue(ThreadID thread_id)
 
                         /* Mark the destinations for this instruction as
                          *  busy */
-                        scoreboard[thread_id].markupInstDests(inst,cpu.getContext(thread_id));
+                        scoreboard.markupInstDests(inst,cpu.getContext(thread_id));
 
                         /* Track this instruction until it is ready to push onward. */
                         thread.inFlightInsts.push_back(fu_inst);
@@ -1409,8 +1406,8 @@ Execute::recvReqRetry()
     cpu.wakeupOnEvent(Pipeline::ExecuteStageId);
 }
 bool
-Execute::lookForForwards(ThreadID tid, const RegId& reg, RegVal& forwarded_val){
-    return scoreboard[tid].lookForForwards(tid, reg, forwarded_val);
+Execute::lookForForwards(CClassDynInstPtr &inst, const RegId& reg, RegVal& forwarded_val){
+    return scoreboard.lookForForwards(inst, reg, forwarded_val);
 }
 
 

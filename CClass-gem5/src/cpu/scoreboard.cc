@@ -58,8 +58,13 @@ Scoreboard::markupInstDests(CClassDynInstPtr inst,ThreadContext *thread_context)
             // to store the register index to clear in writeback
             inst->flatDestRegIdx[dest_index] = reg;
 
-            if (inst->id.execSeqNum > rename_id[index] || rename_id[index] == 0)
+            if (inst->id.execSeqNum > rename_id[index] || rename_id[index] == 0){
+                /*save the rename id if its not 0 for forwarding*/
+                if(rename_id[index] != 0)
+                    inst->id.forwardSeqNum = rename_id[index];
+
                 rename_id[index] = inst->id.execSeqNum;
+            }
 
             DPRINTF(CClassCPU, "Marking up inst: %s regIndex: %d\n", *inst, index);
         } else {
@@ -124,11 +129,13 @@ Scoreboard::clearInstDests(CClassDynInstPtr inst)
         Index index;
 
         if (findIndex(reg, index)) {
+            if(rename_id[index] == inst->id.execSeqNum){
                 rename_id[index] = 0;
 
             DPRINTF(CClassCPU, "Clearing inst: %s"
                 " regIndex: %d \n",
                 *inst, index);
+            }
         }
     }
 }
@@ -141,38 +148,38 @@ Scoreboard::checkExeIsbForId(ThreadID tid, InstSeqNum num)
 {   
     forwardresult result = None;
 
-    if (!baseBuf[tid].empty()){
-        for(const auto& base : baseBuf[tid].getQueue()){
+    if (!(*baseBuf)[tid].empty()){
+        for(const auto& base : (*baseBuf)[tid].getQueue()){
             if(base.containsExecSeqNum(tid, num)) result = Int;
         }
     }
 
 
-    if (!mboxBuf[tid].empty()){
-        for(const auto& mbox : mboxBuf[tid].getQueue()){
+    if (!(*mboxBuf)[tid].empty()){
+        for(const auto& mbox : (*mboxBuf)[tid].getQueue()){
             if(mbox.containsExecSeqNum(tid, num)) result = None;
         }
     }
 
 
-    if (!fboxBuf[tid].empty()){
-        for(const auto& fbox : fboxBuf[tid].getQueue()){
+    if (!(*fboxBuf)[tid].empty()){
+        for(const auto& fbox : (*fboxBuf)[tid].getQueue()){
             if(fbox.containsExecSeqNum(tid, num)) result = None;
         }
     }
 
     /*
-    if (!baseBuf[tid].empty()){
-        for(&auto base : baseBuf[tid])
+    if (!(*baseBuf)[tid].empty()){
+        for(&auto base : (*baseBuf)[tid])
             if(base.containsExecSeqNum(tid, num)) result = Int;
     }
 
-    if (!mboxBuf[tid].empty() &&
-        mboxBuf[tid].front().containsExecSeqNum(tid, num))
+    if (!(*mboxBuf)[tid].empty() &&
+        (*mboxBuf)[tid].front().containsExecSeqNum(tid, num))
         result = None;
 
-    if (!fboxBuf[tid].empty() &&
-        fboxBuf[tid].front().containsExecSeqNum(tid, num))
+    if (!(*fboxBuf)[tid].empty() &&
+        (*fboxBuf)[tid].front().containsExecSeqNum(tid, num))
         result = None;
     */
     /* this shouldn't happen, mem results are unpredictable
@@ -186,7 +193,35 @@ Scoreboard::checkExeIsbForId(ThreadID tid, InstSeqNum num)
 Scoreboard::forwardresult
 Scoreboard::checkMemIsbForId(ThreadID tid, InstSeqNum num)
 {
-    return None;
+    forwardresult result = None;
+     if (!(*memWbBuf)[tid].empty()){
+        for(const auto& mem : (*memWbBuf)[tid].getQueue()){
+            if(mem.containsExecSeqNum(tid, num)) result = Int;
+        }
+    }
+    return result;
+
+}
+void
+Scoreboard::bindBuffersExe(
+    const std::vector<
+        InstructionInputBuffer<ForwardResultData>> *base,
+    const std::vector<
+        InstructionInputBuffer<ForwardResultData>> *mbox,
+    const std::vector<
+        InstructionInputBuffer<ForwardResultData>> *fbox)
+{
+    baseBuf = base;
+    mboxBuf = mbox;
+    fboxBuf = fbox;
+}
+
+void
+Scoreboard::bindBuffersMem(
+    const std::vector<
+        InstructionInputBuffer<ForwardResultData>> *memWb)
+{
+    memWbBuf = memWb;
 }
 
 bool
@@ -211,18 +246,22 @@ Scoreboard::canInstIssue(CClassDynInstPtr inst,ThreadContext *thread_context)
     unsigned int src_index = 0;
 
 
-    while (src_index < num_srcs && !ret)
+    while (src_index < num_srcs && ret)
     {      
         RegId reg = staticInst->srcRegIdx(src_index).flatten(*isa);
         unsigned short int index;
-        
+        /*
+        *we have to mark the destinations only after they are issued and the 
+        * instruction has reached the isb comment it out for now to validate functionality
+        */
         if (findIndex(reg, index)) {
             if(rename_id[index] == 0){
-                markupInstDests(inst ,thread_context);
                 ret = true;
             }
             else{
                 forwardresult can_forward = checkExeIsbForId(tid,rename_id[index]);
+                if(can_forward == None)
+                    can_forward = checkMemIsbForId(tid,rename_id[index]);
                 if(can_forward != None)
                     ret = true;
                 else 
@@ -241,10 +280,22 @@ Scoreboard::canInstIssue(CClassDynInstPtr inst,ThreadContext *thread_context)
 
 RegVal
 Scoreboard::forwardRegResult(ThreadID tid, InstSeqNum num, const RegId &reg){
-    if (!baseBuf[tid].empty()) {
-        for (const auto &base : baseBuf[tid].getQueue()) {
+    if (!(*baseBuf)[tid].empty()) {
+        for (const auto &base : (*baseBuf)[tid].getQueue()) {
             if (base.containsExecSeqNum(tid, num))
                 return base.forwardRegResult(tid, num, reg);
+        }
+    }
+
+    return 0;
+
+}
+RegVal
+Scoreboard::forwardMemRegResult(ThreadID tid, InstSeqNum num, const RegId &reg){
+    if (!(*memWbBuf)[tid].empty()) {
+        for (const auto &mem : (*memWbBuf)[tid].getQueue()) {
+            if (mem.containsExecSeqNum(tid, num))
+                return mem.forwardRegResult(tid, num, reg);
         }
     }
 
@@ -257,18 +308,33 @@ Scoreboard::forwardRegResult(ThreadID tid, InstSeqNum num, const RegId &reg){
 * a vector of bytes instead of RegVal type*/
 
 bool
-Scoreboard::lookForForwards(ThreadID tid, const RegId &reg, RegVal& forwarded_value){
+Scoreboard::lookForForwards(CClassDynInstPtr &inst, const RegId &reg, RegVal& forwarded_value){
 
+    ThreadID tid = inst->id.threadId;
     Index index;
-    if( findIndex(reg,index) ){
-        if (rename_id[index] == 0)
-            return false;
-        forwardresult result_id = checkExeIsbForId(tid, rename_id[index]);
+    InstSeqNum rname;
+    if(inst->id.forwardSeqNum != 0)
+        rname = inst->id.forwardSeqNum;
+    else{
+    if(findIndex(reg,index))
+        rname = rename_id[index]; 
+    }
+    
+    if (rname == 0)
+        return false;
+    forwardresult result_id = checkExeIsbForId(tid, rname);
+    if(result_id != None){
+    forwarded_value = forwardRegResult( tid, rname, reg);
+    return true;
+    }
+    else{
+        result_id = checkMemIsbForId(tid, rname);
         if(result_id != None){
-        forwarded_value = forwardRegResult( tid, rename_id[index], reg);
-        return true;
+            forwarded_value = forwardMemRegResult(tid , rname, reg);
+            return true; 
         }
     }
+    
     return false;
 
 }

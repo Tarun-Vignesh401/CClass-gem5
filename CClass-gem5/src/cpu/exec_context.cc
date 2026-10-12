@@ -4,6 +4,7 @@
 #include "base/bitfield.hh"
 #include "cpu/cclass/execute.hh"
 #include "cpu/cclass/pipe_data.hh"
+#include "debug/CClassExecute.hh"
 
 #include <cassert>
 #include <cstring>
@@ -51,8 +52,11 @@ ExecContext::getRegOperand(const StaticInst *si, int idx)
     if (reg.is(IntRegClass)) {
         RegVal forwarded_value = 0;
 
-        if (execute->lookForForwards(inst->id.threadId, reg, forwarded_value))
+        if (execute->lookForForwards(inst, reg, forwarded_value))
+        {
+            DPRINTF(CClassExecute, "Value has been forwarded reg :%s value : %d\n", reg, forwarded_value);
             return forwarded_value;
+        }
     }
 
     return thread.getReg(reg);

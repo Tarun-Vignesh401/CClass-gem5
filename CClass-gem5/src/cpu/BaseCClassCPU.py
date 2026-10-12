@@ -228,6 +228,7 @@ class BaseCClassCPU(BaseCPU):
     memoryIssueLimit = Param.Unsigned(1, "No. of instructions the memory stage is capable of polling ")
     numFUIDs = Param.Unsigned(30, "no. of instruction fuid's that can be stored")
     writebackWidth = Param.Unsigned(1, "No. of instructions retired in one cycle")
+    memoryInputBufferSize = Param.Unsigned(3,"Size of inputBuffer from Execute")
     def addCheckerCpu(self):
         print("Checker not supported by CClassCPU")
         exit(1)

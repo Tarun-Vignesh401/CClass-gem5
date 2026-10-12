@@ -1,5 +1,5 @@
 #include "cpu/cclass/writeback.hh"
-
+#include <sstream>
 #include "cpu/cclass/cpu.hh"
 #include "debug/CClassWriteBack.hh"
 
@@ -13,12 +13,14 @@ Writeback::Writeback(const std::string &name_, CClassCPU &cpu_,
     const BaseCClassCPUParams &params,
     Latch<ForwardResultData>::Output in_COMMON_,
     Latch<ForwardResultData>::Output in_TRAP_,
-    Latch<InstOrderData>::Output in_order_) :
+    Latch<InstOrderData>::Output in_order_,
+    Scoreboard &scoreboard_) :
     Named(name_),
     cpu(cpu_),
     in_COMMON(in_COMMON_),
     in_TRAP(in_TRAP_),
     in_order(in_order_),
+    scoreboard(scoreboard_),
     inputBuffer_ORDER(name_ + ".inputBuffer_ORDER",
         params.numFUIDs),
     writebackInfo(params.numThreads),
@@ -150,18 +152,22 @@ Writeback::evaluate()
             if (inst && !inst->isBubble() &&
                 inst->id.execSeqNum == inst_num)
             {
-                if (inst->fault == NoFault)
+                if (inst->fault == NoFault){
                     result.commit(*cpu.threads[inst->id.threadId]);
-
+                    scoreboard.clearInstDests(inst);
+                }
+                /*
                 DPRINTF(CClassWriteBack,
                 "Committing inst=%s pc=%#lx pcState=%s execSeq=%llu\n",
                 *inst,
                 inst->pc->instAddr(),
                 *inst->pc,
                 inst->id.execSeqNum);
-                thread.commonInputIndex++;
-                thread.orderIndex++;
-                moved = true;
+                */
+            thread.commonInputIndex++;
+            thread.orderIndex++;
+            moved = true;
+               DPRINTF(CClassWriteBack, "%s\n",formatCommitTrace(inst, result).c_str());
             }
         }
 
@@ -213,6 +219,34 @@ Writeback::evaluate()
     if (!in_order.outputWire->isBubble())
         inputBuffer_ORDER.pushTail();
 }
+
+std::string
+Writeback::formatCommitTrace(const CClassDynInstPtr &inst, const ExecResult &result)
+{
+    std::ostringstream trace;
+
+    trace << "T" << inst->id.threadId
+          << " : 0x" << std::hex << inst->pc->instAddr()
+          << " : "
+          << inst->staticInst->disassemble(inst->pc->instAddr())
+          << " : "
+          << enums::OpClassStrings[inst->staticInst->opClass()]
+          << " :";
+
+    for (const auto &write : result.writes) {
+        trace << " D=";
+
+        if (write.isBytes) {
+            trace << write.reg.regClass().valString(
+                write.bytes.data(), write.bytes.size());
+        } else {
+            trace << "0x" << std::hex << write.val;
+        }
+    }
+
+    return trace.str();
+}
+
 
 } // namespace cclass
 } // namespace gem5

@@ -36,6 +36,7 @@ class Memory : public Named
     Latch<ForwardResultData>::Input out_COMMON;
     Latch<ForwardResultData>::Input out_TRAP;
     Latch<InstOrderData>::Input out_order;
+    Scoreboard &scoreboard;
 
   public:
     std::vector<InstructionInputBuffer<ForwardMemData>> inputBuffer_MEMORY;
@@ -57,6 +58,7 @@ class Memory : public Named
         Latch<ForwardResultData>::Input out_COMMON,
         Latch<ForwardResultData>::Input out_TRAP,
         Latch<InstOrderData>::Input out_order,
+        Scoreboard &scoreboard,
         std::vector<InstructionInputBuffer<ForwardResultData>> &nextStageReserve_COMMON,
         std::vector<InstructionInputBuffer<ForwardResultData>> &nextStageReserve_TRAP);
 
@@ -106,6 +108,8 @@ class Memory : public Named
       /*output indices bookkeeping*/
       unsigned int commonOutputIndex = 0;
       unsigned int trapOutputIndex = 0;
+
+      InstSeqNum lastStreamSeqNum = 1;
 
       bool isStreamed(){
         if(order_index == order.width())return true;

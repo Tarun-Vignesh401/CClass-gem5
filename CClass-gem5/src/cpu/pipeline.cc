@@ -57,14 +57,15 @@ Pipeline::Pipeline(CClassCPU &cpu_, const BaseCClassCPUParams &params) :
         params.executeToMemoryForwardDelay),
     memOrder(cpu.name() + ".memOrder", "inst_order",
         params.executeToMemoryForwardDelay),
+    scoreboard(cpu.name() + ".scoreboard",cpu.threads[0]->getIsaPtr()->regClasses()),
     writeback(cpu.name() + ".writeback", cpu, params,
-        mToCOMMON.output(), mToTRAP.output(), memOrder.output()),
+        mToCOMMON.output(), mToTRAP.output(), memOrder.output(), scoreboard),
     memory(cpu.name() + ".memory", cpu, params,
         eToBASE.output(), eToMEMORY.output(), eToTRAP.output(),
         eToMBOX.output(), eToFBOX.output(), instOrder.output(),
         instOrderPop.output(),
         mToCOMMON.input(), mToTRAP.input(),
-        memOrder.input(), writeback.inputBuffer_COMMON,
+        memOrder.input(), scoreboard , writeback.inputBuffer_COMMON,
         writeback.inputBuffer_TRAP),
     execute(cpu.name() + ".execute", cpu, params,
         dToE.output(), eToF1.input(), eToF2.input(), eToD.input(),
@@ -73,7 +74,7 @@ Pipeline::Pipeline(CClassCPU &cpu_, const BaseCClassCPUParams &params) :
         memory.inputBuffer_MEMORY, memory.inputBuffer_TRAP,
         memory.inputBuffer_MBOX, memory.inputBuffer_FBOX,
         memory.inputBuffer_ORDER,
-        instOrder.input(), instOrderPop.input()),
+        instOrder.input(), instOrderPop.input(), scoreboard),
     decode(cpu.name() + ".decode", cpu, params, eToD.output(),
         f2ToD.output(), dToE.input(), execute.inputBuffer),
     fetch2(cpu.name() + ".fetch2", cpu, params, eToF2.output(), f1ToF2.output(),
@@ -89,6 +90,14 @@ Pipeline::Pipeline(CClassCPU &cpu_, const BaseCClassCPUParams &params) :
       *  needToSignalDrained(false)
       *  */
 {
+    scoreboard.bindBuffersExe(
+    &memory.inputBuffer_BASE,
+    &memory.inputBuffer_MBOX,
+    &memory.inputBuffer_FBOX);
+
+    scoreboard.bindBuffersMem(
+        &writeback.inputBuffer_COMMON);
+        
     if (params.fetch1ToFetch2ForwardDelay < 1) {
         fatal("%s: fetch1ToFetch2ForwardDelay must be >= 1 (%d)\n",
             cpu.name(), params.fetch1ToFetch2ForwardDelay);
@@ -135,6 +144,7 @@ Pipeline::evaluate()
      *  'immediate', 0-time-offset TimeBuffer activity to be visible from
      *  later stages to earlier ones in the same cycle */
     //execute.evaluate();
+    /*
     fetch1.evaluate();
     //std::cout<<"I am in fetch1!\n";
 
@@ -147,6 +157,13 @@ Pipeline::evaluate()
     execute.evaluate();
     memory.evaluate();
     writeback.evaluate();
+    */
+   writeback.evaluate();
+   memory.evaluate();
+   execute.evaluate();
+   decode.evaluate();
+   fetch2.evaluate();
+   fetch1.evaluate();
 
     //std::cout << "current cycle : " << cpu.curCycle() << "\n";
     /*if (debug::MinorTrace)

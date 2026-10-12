@@ -8,6 +8,7 @@
 #include "cpu/cclass/pipe_data.hh"
 #include "params/BaseCClassCPU.hh"
 #include "enums/OpClass.hh"
+#include "cpu/cclass/scoreboard.hh"
 #include <sstream>
 
 namespace gem5
@@ -25,6 +26,7 @@ class Writeback : public Named
     Latch<ForwardResultData>::Output in_COMMON;
     Latch<ForwardResultData>::Output in_TRAP;
     Latch<InstOrderData>::Output in_order;
+    Scoreboard &scoreboard;
 
   public:
     std::vector<InstructionInputBuffer<ForwardResultData>> inputBuffer_COMMON;
@@ -35,7 +37,8 @@ class Writeback : public Named
         const BaseCClassCPUParams &params,
         Latch<ForwardResultData>::Output in_COMMON_,
         Latch<ForwardResultData>::Output in_TRAP_,
-        Latch<InstOrderData>::Output in_order_);
+        Latch<InstOrderData>::Output in_order_,
+        Scoreboard &scoreboard);
 
     void evaluate();
 
