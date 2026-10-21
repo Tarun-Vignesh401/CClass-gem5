@@ -245,6 +245,12 @@ class FUPipeline : public FUPipelineBase, public FuncUnit
      *  latency != 0) result from */
     std::vector<bool> cantForwardFromFUIndices;
 
+    /** Storage used when this FU has a logical zero-cycle latency.  The
+     *  underlying TimeBuffer still has one physical slot; this slot is
+     *  visible at both push and pop in the same execute evaluation. */
+    QueuedInst zeroSlot;
+    bool zeroPushed;
+
   public:
     /** When can a new instruction be inserted into the pipeline?  This is
      *  an absolute cycle time unless it is 0 in which case the an
@@ -254,6 +260,16 @@ class FUPipeline : public FUPipelineBase, public FuncUnit
   public:
     FUPipeline(const std::string &name, const CClassFU &description_,
         ClockedObject &timeSource_);
+
+    /** Whether this FU completes an operation without using its normal
+     *  pipeline slots. */
+    bool isZeroLatency() const;
+
+    /** FU interface with zero-latency handling. */
+    void push(QueuedInst &inst);
+    QueuedInst &front();
+    const QueuedInst &front() const;
+    bool alreadyPushed();
 
   public:
     /** How many cycles must from curCycle before insertion into the

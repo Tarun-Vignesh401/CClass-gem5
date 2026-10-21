@@ -106,6 +106,8 @@ Execute::Execute(const std::string &name_, CClassCPU &cpu_,
          *  the inFlightInst queue) and the maximum latency of any FU
          *  (for sizing the activity recorder) */
         total_slots += fu_description->opLat;
+        if (fu_description->opLat == Cycles(0))
+            total_slots++;
 
         fu_name << name_ << ".fu." << i;
 
@@ -564,7 +566,7 @@ Execute::issue(ThreadID thread_id)
 
                         /* Mark the destinations for this instruction as
                          *  busy */
-                        scoreboard.markupInstDests(inst,cpu.getContext(thread_id));
+                        //scoreboard.markupInstDests(inst,cpu.getContext(thread_id));
 
                         /* Track this instruction until it is ready to push onward. */
                         thread.inFlightInsts.push_back(fu_inst);
@@ -764,6 +766,7 @@ Execute::trytoPush(ThreadID tid){
                     if (pushMemReqToLatch(tid, mem_request)) {
                         pendingMemRequests.erase(request_key);
                         fu->stalled = false;
+                        scoreboard.markupInstDests(inst,cpu.getContext(tid));
                         it = thread.inFlightInsts.erase(it);
                         continue;
                     }
@@ -787,11 +790,13 @@ Execute::trytoPush(ThreadID tid){
                 inst->fault = fault;
 
                 if (!pushInstToLatch(tid, result)) {
+                    fu->stalled = true;
                     ++it;
                     continue;
                 }
 
                 fu->stalled = false;
+                scoreboard.markupInstDests(inst,cpu.getContext(tid));
                 it = thread.inFlightInsts.erase(it);
                 continue;
             }

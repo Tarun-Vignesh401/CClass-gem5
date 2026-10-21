@@ -42,6 +42,18 @@ CClassFUTiming::CClassFUTiming(
 namespace cclass
 {
 
+namespace
+{
+
+/* TimeBuffer/SelfStallingPipeline require at least one physical slot. */
+Cycles
+physicalLatency(Cycles latency)
+{
+    return latency == Cycles(0) ? Cycles(1) : latency;
+}
+
+} // anonymous namespace
+
 void
 QueuedInst::reportData(std::ostream &os) const
 {
@@ -50,24 +62,28 @@ QueuedInst::reportData(std::ostream &os) const
 
 FUPipeline::FUPipeline(const std::string &name, const CClassFU &description_,
     ClockedObject &timeSource_) :
-    FUPipelineBase(name, "insts", description_.opLat),
+    FUPipelineBase(name, "insts", physicalLatency(description_.opLat)),
     description(description_),
     timeSource(timeSource_),
+    zeroSlot(QueuedInst::bubble()),
+    zeroPushed(false),
     nextInsertCycle(Cycles(0))
 {
+    const Cycles latency = physicalLatency(description.opLat);
+
     /* Issue latencies are set to 1 in calls to addCapability here.
      * Issue latencies are associated with the pipeline as a whole,
      * rather than instruction classes in CClass */
 
     /* All pipelines should be able to execute No_OpClass instructions */
-    addCapability(No_OpClass, description.opLat, 1);
+    addCapability(No_OpClass, latency, 1);
 
     /* Add the capabilities listed in the CClassFU for this functional unit */
     for (unsigned int i = 0; i < description.opClasses->opClasses.size();
          i++)
     {
         addCapability(description.opClasses->opClasses[i]->opClass,
-            description.opLat, 1);
+            latency, 1);
     }
 
     for (unsigned int i = 0; i < description.timings.size(); i++) {
@@ -104,6 +120,48 @@ FUPipeline::FUPipeline(const std::string &name, const CClassFU &description_,
     }
 }
 
+bool
+FUPipeline::isZeroLatency() const
+{
+    return description.opLat == Cycles(0);
+}
+
+void
+FUPipeline::push(QueuedInst &inst)
+{
+    if (!isZeroLatency()) {
+        FUPipelineBase::push(inst);
+        return;
+    }
+
+    assert(!zeroPushed);
+    zeroSlot = inst;
+    zeroPushed = !inst.isBubble();
+
+    if (zeroPushed)
+        occupancy++;
+}
+
+QueuedInst &
+FUPipeline::front()
+{
+    return isZeroLatency() ? zeroSlot : FUPipelineBase::front();
+}
+
+const QueuedInst &
+FUPipeline::front() const
+{
+    return isZeroLatency() ? zeroSlot : FUPipelineBase::front();
+}
+
+bool
+FUPipeline::alreadyPushed()
+{
+    return isZeroLatency()
+        ? zeroPushed
+        : FUPipelineBase::alreadyPushed();
+}
+
 Cycles
 FUPipeline::cyclesBeforeInsert()
 {
@@ -122,6 +180,25 @@ FUPipeline::canInsert() const
 void
 FUPipeline::advance()
 {
+    if (isZeroLatency()) {
+        /* Preserve the same issue-latency rule as the normal FU path. */
+        if (zeroPushed && nextInsertCycle <= timeSource.curCycle()) {
+            nextInsertCycle =
+                timeSource.curCycle() + description.issueLat;
+        }
+
+        /* A zero-latency result is consumed by trytoPush during the same
+         * evaluation.  If the FU was stalled, retain it for retry. */
+        if (!stalled && zeroPushed) {
+            zeroSlot = QueuedInst::bubble();
+            zeroPushed = false;
+            if (occupancy > 0)
+                occupancy--;
+        }
+
+        return;
+    }
+
     bool was_stalled = stalled;
 
     /* If an instruction was pushed into the pipeline, set the delay before

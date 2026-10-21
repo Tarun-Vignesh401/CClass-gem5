@@ -5,6 +5,7 @@
 #include "cpu/cclass/execute.hh"
 #include "cpu/cclass/pipe_data.hh"
 #include "debug/CClassExecute.hh"
+#include "debug/CClassScoreboard.hh"
 
 #include <cassert>
 #include <cstring>
@@ -54,7 +55,7 @@ ExecContext::getRegOperand(const StaticInst *si, int idx)
 
         if (execute->lookForForwards(inst, reg, forwarded_value))
         {
-            DPRINTF(CClassExecute, "Value has been forwarded reg :%s value : %d\n", reg, forwarded_value);
+            DPRINTF(CClassScoreboard, "Value has been forwarded reg :%s value : %d\n", reg, forwarded_value);
             return forwarded_value;
         }
     }

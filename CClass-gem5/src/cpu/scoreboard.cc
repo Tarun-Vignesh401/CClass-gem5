@@ -59,10 +59,6 @@ Scoreboard::markupInstDests(CClassDynInstPtr inst,ThreadContext *thread_context)
             inst->flatDestRegIdx[dest_index] = reg;
 
             if (inst->id.execSeqNum > rename_id[index] || rename_id[index] == 0){
-                /*save the rename id if its not 0 for forwarding*/
-                if(rename_id[index] != 0)
-                    inst->id.forwardSeqNum = rename_id[index];
-
                 rename_id[index] = inst->id.execSeqNum;
             }
 
@@ -313,12 +309,9 @@ Scoreboard::lookForForwards(CClassDynInstPtr &inst, const RegId &reg, RegVal& fo
     ThreadID tid = inst->id.threadId;
     Index index;
     InstSeqNum rname;
-    if(inst->id.forwardSeqNum != 0)
-        rname = inst->id.forwardSeqNum;
-    else{
+   
     if(findIndex(reg,index))
         rname = rename_id[index]; 
-    }
     
     if (rname == 0)
         return false;
