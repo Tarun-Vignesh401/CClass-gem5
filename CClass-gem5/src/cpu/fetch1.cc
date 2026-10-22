@@ -130,6 +130,11 @@ Fetch1::checkRedirect(Fetch1ThreadInfo &out_thread)
         nextStageReserve[tid].reserve();
         processResponse(out_thread, thread); // sends target PC once
         advancepc(tid);                      // private Fetch1 PC -> successor
+    } else {
+        DPRINTF(CClassFetch1,
+            "Redirect target stalled: tid=%d target=%#lx Fetch1->Fetch2 "
+            "buffer cannot reserve; PC remains pending\n",
+            tid, thread.FetchAddr);
     }
 
     return true;
@@ -253,7 +258,10 @@ void Fetch1::evaluate(){
             advancepc(tid);
         }
         else{
-            //DPRINTF(CClassFetch1,"PC generation halted\n");
+            DPRINTF(CClassFetch1,
+                "PC generation stalled: tid=%d fetchAddr=%#lx "
+                "Fetch1->Fetch2 buffer cannot reserve\n",
+                tid, fetchInfo[tid].FetchAddr);
             fetchInfo[tid].state = PCGenHalted;
         }
 

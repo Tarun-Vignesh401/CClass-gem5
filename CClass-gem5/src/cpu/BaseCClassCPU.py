@@ -163,7 +163,8 @@ class CClassDefaultMemFU(CClassFU):
             description="Mem", srcRegsRelativeLats=[1], extraAssumedLat=2
         )
     ]
-    opLat = 1
+    opLat = 0
+    issueLat = 1
 
 class CClassDefaultFUPool(CClassFUPool):
     funcUnits = [

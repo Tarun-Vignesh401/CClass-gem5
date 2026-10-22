@@ -91,6 +91,19 @@ if (!inp.outputWire->isBubble())
 
         const ForwardLineData *line_in = getInput(tid);
 
+        if (line_in && thread.blocked) {
+            DPRINTF(CClassDecode,
+                "Decode stalled on output capacity: tid=%d line=%s "
+                "inputIndex=%u output buffer cannot reserve\n",
+                tid, line_in->id, thread.inputIndex);
+        } else if (!line_in) {
+            DPRINTF(CClassDecode,
+                "Decode has no input line: tid=%d expectedStream=%llu "
+                "predictionSeq=%llu incomingBubble=%d\n",
+                tid, thread.expectedStreamSeqNum, thread.predictionSeqNum,
+                inp.outputWire->isBubble());
+        }
+
         while (line_in &&
             thread.expectedStreamSeqNum == line_in->id.streamSeqNum &&
             thread.predictionSeqNum != line_in->id.predictionSeqNum)
@@ -350,7 +363,13 @@ if (!inp.outputWire->isBubble())
                 line_in = getInput(tid);
             }
         }
-            }
+    } else if (tid != InvalidThreadID && decodeInfo[tid].blocked) {
+        const ForwardLineData *line_in = getInput(tid);
+        DPRINTF(CClassDecode,
+            "Decode cannot run: tid=%d output buffer cannot reserve "
+            "inputPresent=%d inputIndex=%u\n",
+            tid, line_in != nullptr, decodeInfo[tid].inputIndex);
+    }
     if (tid == InvalidThreadID) {
         assert(insts_out.isBubble());
     }
@@ -384,6 +403,11 @@ Decode::checkRedirect()
 
     DPRINTF(CClassDecode, "Decode saw branch data: %s\n", branch_data);
 
+     /* reservation has not been freed yet this ensures we are doing it properly*/
+   if (!inp.outputWire->isBubble()){
+        inputBuffer[inp.outputWire->id.threadId].setTail(*inp.outputWire);
+        inputBuffer[inp.outputWire->id.threadId].pushTail();
+    }
     for (ThreadID tid = 0; tid < cpu.numThreads; tid++) {
         while (!inputBuffer[tid].empty())
             popInput(tid);

@@ -722,7 +722,7 @@ Execute::trytoPush(ThreadID tid){
                 if (request_it != pendingMemRequests.end()) {
                     mem_request = request_it->second;
                 } else {
-                    if(!thread.blocked_memory){
+                if(!thread.blocked_memory){
                     /* do not execute a request until the isb is free.
                     * if I allow this to happen even if blocked the for loop will make
                     *multiple same requests to the cache */
@@ -736,7 +736,12 @@ Execute::trytoPush(ThreadID tid){
                     if (mem_request)
                         pendingMemRequests[request_key] = mem_request;
                     }
+                     /*when memory is blocked stall the fu!*/
+                    else{
+                        fu->stalled = true;
+                    }
                 }
+               
                 //fault created while making a memory request to the dcache
                 if (inst->fault != NoFault) {
                     pendingMemRequests.erase(request_key);

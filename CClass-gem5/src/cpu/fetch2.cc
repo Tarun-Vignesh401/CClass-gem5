@@ -368,16 +368,29 @@ Fetch2::processResponse(Fetch2::FetchRequestPtr response,
 }
 void 
 Fetch2::evaluate(){
-    if (checkRedirect())
+    ThreadID fetch_tid = in_thread.outputWire->tid;
+    if (checkRedirect()){
         return;
+    }
 
     for (ThreadID tid = 0; tid < cpu.numThreads; ++tid)
         fetch2Info[tid].blocked = !nextStageReserve[tid].canReserve();
 
-    ThreadID fetch_tid = in_thread.outputWire->tid;
     //const Fetch1ThreadInfo* thread = getInput(fetch_tid);
     if( fetchState == FetchWaiting ){
             fetch2_thread = getInput(fetch_tid);
+    }
+
+    if (!fetch2_thread) {
+        DPRINTF(CClassFetch2,
+            "Fetch2 has no input: tid=%d state=%d inputEmpty=%d "
+            "Fetch1LatchBubble=%d requests=%u transfers=%u "
+            "ITLB=%u ICache=%u\n",
+            fetch_tid, fetchState,
+            fetch_tid == InvalidThreadID || inputBuffer[fetch_tid].empty(),
+            in_thread.outputWire->isBubble(), requests.occupiedSpace(),
+            transfers.occupiedSpace(), numFetchesInITLB,
+            numFetchesInMemorySystem);
     }
 
     if (!in_thread.outputWire->isBubble()){
@@ -403,6 +416,13 @@ if(fetch2_thread)
             /* Take up a slot in the fetch queue */
             nextStageReserve[fetch_tid].reserve();
             fetchState = FetchRunning;
+            } else {
+                DPRINTF(CClassFetch2,
+                    "Fetch2 cannot start fetch: tid=%d blockedByDecode=%d "
+                    "inFlight=%u limit=%u state=%d inputEmpty=%d\n",
+                    fetch_tid, fetch2Info[fetch_tid].blocked,
+                    numInFlightFetches(), fetchLimit, fetchState,
+                    inputBuffer[fetch_tid].empty());
             }
     }
     /*Tries to move FetchRequest from requests to transfers queue*/
@@ -436,6 +456,13 @@ if(fetch2_thread)
 
         }
         popAndDiscard(transfers);
+    } else if (!transfers.empty()) {
+        DPRINTF(CClassFetch2,
+            "Fetch2 waiting for transfer completion: tid=%d "
+            "transferState=%d requests=%u transfers=%u ITLB=%u ICache=%u\n",
+            transfers.front()->id.threadId, transfers.front()->state,
+            requests.occupiedSpace(), transfers.occupiedSpace(),
+            numFetchesInITLB, numFetchesInMemorySystem);
     }
       
 }//if(thread)...
@@ -521,8 +548,15 @@ Fetch2::checkRedirect()
     streamSeqNum[tid] = branch_data.newStreamSeqNum;
     predictionSeqNum[tid] = branch_data.newPredictionSeqNum;
 
+
+    /* reservation has not been freed yet this ensures we are doing it properly*/
+    if (!in_thread.outputWire->isBubble()){
+        inputBuffer[tid].setTail(*in_thread.outputWire);
+        inputBuffer[tid].pushTail();
+    }
+
     while (!inputBuffer[tid].empty())
-        inputBuffer[tid].pop();
+      inputBuffer[tid].pop();
 
     fetch2_thread = nullptr;
     fetchState = FetchWaiting;

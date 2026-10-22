@@ -308,6 +308,7 @@ Memory::evaluate()
                         /*multi issue you have to make it into both pop and order
                         *index increment*/
                         thread.order_index++;
+                        thread.baseInputIndex++;
                         //popOrderInput();
                         DPRINTF(CClassMemory,
                         "Popped instruction %s due to stream mismatch "
@@ -316,7 +317,7 @@ Memory::evaluate()
                         inst->id.streamSeqNum,
                         thread.lastStreamSeqNum); 
                         scoreboard.clearInstDests(inst);
-                        popInstInput(tid,inputBuffer_BASE);
+                        //popInstInput(tid,inputBuffer_BASE);
                     }
                     else{
                         if (pushCommon(tid, result)) {
@@ -342,6 +343,7 @@ Memory::evaluate()
                     if (inst->id.streamSeqNum != thread.lastStreamSeqNum){
                         found = false;
                         thread.order_index++;
+                        thread.trapInputIndex++;
                         DPRINTF(CClassMemory,
                         "Popped instruction %s due to stream mismatch "
                         "inst stream: %llu, expected stream: %llu\n",
@@ -349,7 +351,7 @@ Memory::evaluate()
                         inst->id.streamSeqNum,
                         thread.lastStreamSeqNum);
                         scoreboard.clearInstDests(inst);
-                         popInstInput(tid,inputBuffer_TRAP);
+                         //popInstInput(tid,inputBuffer_TRAP);
                     }
                     else{
                         if (pushTrap(tid, result)) {
@@ -374,6 +376,7 @@ Memory::evaluate()
                     if (inst->id.streamSeqNum != thread.lastStreamSeqNum){
                         found = false;
                         thread.order_index++;
+                        thread.mboxInputIndex++;
                         DPRINTF(CClassMemory,
                         "Popped instruction %s due to stream mismatch "
                         "inst stream: %llu, expected stream: %llu\n",
@@ -381,7 +384,7 @@ Memory::evaluate()
                         inst->id.streamSeqNum,
                         thread.lastStreamSeqNum);
                         scoreboard.clearInstDests(inst);
-                        popInstInput(tid,inputBuffer_MBOX);
+                        //popInstInput(tid,inputBuffer_MBOX);
                     }
                     else{
                         if (pushCommon(tid, result)) {
@@ -405,6 +408,7 @@ Memory::evaluate()
                     if (inst->id.streamSeqNum != thread.lastStreamSeqNum){
                         found = false;
                         thread.order_index++;
+                        thread.fboxInputIndex++;
                         DPRINTF(CClassMemory,
                         "Popped instruction %s due to stream mismatch "
                         "inst stream: %llu, expected stream: %llu\n",
@@ -412,7 +416,7 @@ Memory::evaluate()
                         inst->id.streamSeqNum,
                         thread.lastStreamSeqNum);
                         scoreboard.clearInstDests(inst);
-                        popInstInput(tid,inputBuffer_FBOX);
+                        //popInstInput(tid,inputBuffer_FBOX);
                     }
                     else{
                         if (pushCommon(tid, result)) {
@@ -435,7 +439,8 @@ Memory::evaluate()
                     found = true;
                     if (inst->id.streamSeqNum != thread.lastStreamSeqNum){
                         found = false;
-                        thread.order_index++;
+                        thread.order_index++;                           
+                        thread.memoryInputIndex++;
                         DPRINTF(CClassMemory,
                         "Popped instruction %s due to stream mismatch "
                         "inst stream: %llu, expected stream: %llu\n",
@@ -443,7 +448,7 @@ Memory::evaluate()
                         inst->id.streamSeqNum,
                         thread.lastStreamSeqNum);
                         scoreboard.clearInstDests(inst);
-                        popMemInput(tid);
+                        //popMemInput(tid);
                     }
                     else{
                     /* translation fault check */
