@@ -17,11 +17,13 @@ Decode::Decode(const std::string &name,
     CClassCPU &cpu_,
     const BaseCClassCPUParams &params,
     Latch<BranchData>::Output branch_,
+    Latch<BranchData>::Output trap_redirect_,
     Latch<ForwardLineData>::Output inp_,
     Latch<ForwardInstData>::Input out_,
     std::vector<InputBuffer<ForwardInstData>> &next_stage_input_buffer) :
     Named(name),
     branch(branch_),
+    trapRedirect(trap_redirect_),
     inp(inp_),
     out(out_),
     nextStageReserve(next_stage_input_buffer),
@@ -396,7 +398,8 @@ if (!inp.outputWire->isBubble())
 bool
 Decode::checkRedirect()
 {
-    const BranchData &branch_data = *branch.outputWire;
+    const BranchData &branch_data = !trapRedirect.outputWire->isBubble() ?
+        *trapRedirect.outputWire : *branch.outputWire;
 
     if (branch_data.isBubble())
         return false;
@@ -411,6 +414,13 @@ Decode::checkRedirect()
     for (ThreadID tid = 0; tid < cpu.numThreads; tid++) {
         while (!inputBuffer[tid].empty())
             popInput(tid);
+        if (branch_data.reason == BranchData::Trap) {
+            decodeInfo[tid].inputIndex = 0;
+            decodeInfo[tid].havePC = false;
+            decodeInfo[tid].expectedStreamSeqNum = branch_data.newStreamSeqNum;
+            decodeInfo[tid].predictionSeqNum = branch_data.newPredictionSeqNum;
+            cpu.getContext(tid)->getDecoderPtr()->reset();
+        }
     }
 
     return true;

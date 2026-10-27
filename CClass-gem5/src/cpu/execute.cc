@@ -59,9 +59,11 @@ Execute::Execute(const std::string &name_, CClassCPU &cpu_,
                  InstructionInputBuffer<InstOrderData> &nextStageReserve_ORDER,
                  Latch<InstOrderData>::Input inst_order_,
                  Latch<instorder_pop>::Input out_instorder_pop_,    
+                 Latch<BranchData>::Output in_trap_redirect_,
                  Scoreboard &scoreboard_):
       Named(name_),
       inp(inp_),
+      in_trap_redirect(in_trap_redirect_),
       out_fetch1(out_fetch1),
       out_fetch2(out_fetch2),
       out_decode(out_decode),
@@ -215,6 +217,36 @@ Execute::evaluate(){
     *out_fetch2.inputWire = BranchData::bubble();
     *out_decode.inputWire = BranchData::bubble();
 
+    const BranchData &trap = *in_trap_redirect.outputWire;
+    if (trap.reason == BranchData::Trap) {
+        if (!inp.outputWire->isBubble())
+            inputBuffer[inp.outputWire->threadId].pushTail();
+        for (ThreadID tid = 0; tid < cpu.numThreads; ++tid) {
+            while (!inputBuffer[tid].empty())
+                popInput(tid);
+            auto &info = executeInfo[tid];
+            info.inFlightInsts.clear();
+            info.inputIndex = 0;
+            info.inst_order_filled = false;
+            info.trapPending = false;
+            info.drainState = NotDraining;
+            info.streamSeqNum = trap.newStreamSeqNum;
+        }
+        pendingMemRequests.clear();
+        for (auto *fu : funcUnits) {
+            fu->stalled = false;
+            fu->advance();
+        }
+        *out_BASE.inputWire = ForwardResultData::bubble();
+        *out_MEMORY.inputWire = ForwardMemData::bubble();
+        *out_TRAP.inputWire = ForwardResultData::bubble();
+        *out_MBOX.inputWire = ForwardResultData::bubble();
+        *out_FBOX.inputWire = ForwardResultData::bubble();
+        *inst_order.inputWire = InstOrderData::bubble();
+        *out_instorder_pop.inputWire = instorder_pop(false, 0);
+        return;
+    }
+
     // for each cycle one issuing thread...
     ThreadID issue_tid = getIssuingThread();
     //SetStalls(issue_tid);
@@ -357,6 +389,17 @@ Execute::issue(ThreadID thread_id)
     /* Early termination if we have no instructions */
     if (!insts_in)
         return 0;
+
+    if (thread.trapPending) {
+        if (thread.inputIndex != 0 && !thread.inst_order_filled)
+            thread.inst_order_filled = FillSequence(insts_in);
+        if (thread.inst_order_filled &&
+            thread.inputIndex == insts_in->width()) {
+            popInput(thread_id);
+            thread.inst_order_filled = false;
+        }
+        return 0;
+    }
     
     /* filling sequence numbers at the earliest as soon as decode gives 
     * data out
@@ -448,6 +491,9 @@ Execute::issue(ThreadID thread_id)
                     /* Track this instruction until it is ready to push onward. */
                     QueuedInst fu_inst(inst);
                     thread.inFlightInsts.push_back(fu_inst);
+
+                    if (inst->staticInst->isSyscall())
+                        thread.trapPending = true;
 
                     issued = true;
 
@@ -628,12 +674,14 @@ Execute::issue(ThreadID thread_id)
             /*we have to fill the sequence numbers once 
             * we get the packet from decode not after we 
             * finish issuing them?*/
-            if(inst->id.streamSeqNum == thread.streamSeqNum)
-                FillSequence(insts_in);
-            popInput(thread_id);
-            /* have to reset the inst_order for the new
-            * forwardlinedata */
-            thread.inst_order_filled = false;
+            if(inst->id.streamSeqNum == thread.streamSeqNum &&
+                !thread.inst_order_filled)
+                thread.inst_order_filled = FillSequence(insts_in);
+            if (!thread.trapPending || thread.inst_order_filled) {
+                popInput(thread_id);
+                /* Reset the order state for the next Decode packet. */
+                thread.inst_order_filled = false;
+            }
             /* Set insts_in to null to force us to leave the surrounding
              *  loop */
             insts_in = NULL;
@@ -642,6 +690,7 @@ Execute::issue(ThreadID thread_id)
         /* We still have instructions */
         fu_index != numFuncUnits && /* Not visited all FUs */
         issued && /* We've not yet failed to issue an instruction */
+        !thread.trapPending &&
         num_insts_issued != issueLimit && /* Still allowed to issue */
         num_mem_insts_issued != memoryIssueLimit);
 
@@ -655,13 +704,37 @@ Execute::trytoPush(ThreadID tid){
 
     if (thread.inFlightInsts.empty())
         return;
+    
+    int pushed = 0;
 
     /*there might be an issue limit, but here no isb pushing limit
     enforced push as much as possible at every cycle */
     for (auto it = thread.inFlightInsts.begin();
         it != thread.inFlightInsts.end(); )
-    {
+    {       
+        SetStalls(tid);
+        //if(pushed >= issueLimit)
+        //    break;
         CClassDynInstPtr inst = it->inst;
+
+        if (inst->staticInst && inst->staticInst->isSyscall()) {
+            if (thread.blocked_trap) {
+                ++it;
+                continue;
+            }
+            ExecResult result;
+            result.inst = inst;
+            ExecContext context(cpu, *cpu.threads[tid], this, inst, &result);
+            inst->fault = inst->staticInst->execute(&context, inst->traceData);
+            assert(inst->fault != NoFault);
+            if (pushInstToLatch(tid, result)) {
+                it = thread.inFlightInsts.erase(it);
+                pushed++;
+                continue;
+            }
+            ++it;
+            continue;
+        }
 
         if (inst->isBubble()) {
             it = thread.inFlightInsts.erase(it);
@@ -674,6 +747,7 @@ Execute::trytoPush(ThreadID tid){
 
             if (pushInstToLatch(tid, result)) {
                 it = thread.inFlightInsts.erase(it);
+                pushed++;
                 continue;
             }
             /*no need to stall any functional units here*/
@@ -712,6 +786,7 @@ Execute::trytoPush(ThreadID tid){
 
             fu->stalled = false;
             it = thread.inFlightInsts.erase(it);
+            pushed++;
             continue;
          }// control instruction handling...
             else if (inst->isMemRef()) {
@@ -750,6 +825,7 @@ Execute::trytoPush(ThreadID tid){
                     if (pushInstToLatch(tid, result)) {
                         fu->stalled = false;
                         it = thread.inFlightInsts.erase(it);
+                        pushed++;
                         continue;
                     }
                     /* no stalling fu's for faults*/
@@ -762,6 +838,7 @@ Execute::trytoPush(ThreadID tid){
                     if (pushInstToLatch(tid, result)) {
                         fu->stalled = false;
                         it = thread.inFlightInsts.erase(it);
+                        pushed++;
                         continue;
                     }
                   
@@ -773,6 +850,7 @@ Execute::trytoPush(ThreadID tid){
                         fu->stalled = false;
                         scoreboard.markupInstDests(inst,cpu.getContext(tid));
                         it = thread.inFlightInsts.erase(it);
+                        pushed++;
                         continue;
                     }
                     else 
@@ -803,6 +881,7 @@ Execute::trytoPush(ThreadID tid){
                 fu->stalled = false;
                 scoreboard.markupInstDests(inst,cpu.getContext(tid));
                 it = thread.inFlightInsts.erase(it);
+                pushed++;
                 continue;
             }
             else{
@@ -813,6 +892,10 @@ Execute::trytoPush(ThreadID tid){
                 inst->id.execSeqNum,
                 fu->stalled);
                 fu->stalled = true;
+                /* even if we are stalling we have to make sure that the destination
+                * is marked*/
+                scoreboard.markupInstDests(inst,cpu.getContext(tid));
+
             }
             }// any other instruction handling...
         } else if (fu->stalled) {

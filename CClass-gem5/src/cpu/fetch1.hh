@@ -30,6 +30,7 @@ namespace gem5
             // have to make the class template for this
             std::vector<InputBuffer<Fetch1ThreadInfo>> &nextStageReserve;
             Latch<BranchData>::Output inp;
+            Latch<BranchData>::Output trapRedirect;
             Latch<Fetch1ThreadInfo>::Input out;
             //idk maybe this should come in fetch2?
            // Addr lineSnap;
@@ -42,7 +43,9 @@ namespace gem5
            
             public:
             Fetch1(const std::string &name_,CClassCPU &cpu_,const BaseCClassCPUParams &params,
-                Latch<BranchData>::Output inp_, Latch<Fetch1ThreadInfo>::Input out_,
+                Latch<BranchData>::Output inp_,
+                Latch<BranchData>::Output trap_redirect_,
+                Latch<Fetch1ThreadInfo>::Input out_,
                 std::vector<InputBuffer<Fetch1ThreadInfo>> &nextStageReserve_);
             void evaluate();
 

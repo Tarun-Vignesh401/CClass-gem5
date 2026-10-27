@@ -20,6 +20,7 @@ namespace cclass {
 Fetch2::Fetch2(const std::string &name_, CClassCPU &cpu_,
     const BaseCClassCPUParams &params,
     Latch<BranchData>::Output branch_,
+    Latch<BranchData>::Output trap_redirect_,
     Latch<Fetch1ThreadInfo>::Output in_thread_,
     Latch<ForwardLineData>::Input out_,
     std::vector<InputBuffer<ForwardLineData>> &next_stage_input_buffer) :
@@ -27,6 +28,7 @@ Fetch2::Fetch2(const std::string &name_, CClassCPU &cpu_,
     cpu(cpu_),
     in_thread(in_thread_),
     branch(branch_),
+    trapRedirect(trap_redirect_),
     out(out_),
     nextStageReserve(next_stage_input_buffer),
     fetchLimit(params.fetch1FetchLimit),
@@ -534,7 +536,8 @@ Fetch2::popInput(ThreadID tid)
 bool
 Fetch2::checkRedirect()
 {
-    const BranchData &branch_data = *branch.outputWire;
+    const BranchData &branch_data = !trapRedirect.outputWire->isBubble() ?
+        *trapRedirect.outputWire : *branch.outputWire;
 
     if (branch_data.isBubble())
         return false;

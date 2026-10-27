@@ -22,6 +22,7 @@ namespace gem5
         Fetch2(const std::string &name_, CClassCPU &cpu_,
             const BaseCClassCPUParams &params,
             Latch<BranchData>::Output branch_,
+            Latch<BranchData>::Output trap_redirect_,
             Latch<Fetch1ThreadInfo>::Output in_thread_,
             Latch<ForwardLineData>::Input out_,
             std::vector<InputBuffer<ForwardLineData>> &next_stage_input_buffer);
@@ -37,6 +38,7 @@ namespace gem5
         Latch<Fetch1ThreadInfo>::Output in_thread;
 
         Latch<BranchData>::Output branch;
+        Latch<BranchData>::Output trapRedirect;
 
         Latch<ForwardLineData>::Input out;
 

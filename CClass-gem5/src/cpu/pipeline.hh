@@ -59,6 +59,7 @@ class Pipeline : public Ticked
     Latch<ForwardMemData> mToCOMMON_MEM;
     Latch<ForwardResultData> mToTRAP;
     Latch<InstOrderData> memOrder;
+    Latch<BranchData> wToTrap;
 
     Scoreboard scoreboard;
     Writeback writeback;

@@ -29,12 +29,14 @@ namespace gem5
             CClassCPU &cpu_,
             const BaseCClassCPUParams &params,
             Latch<BranchData>::Output inp_,
+            Latch<BranchData>::Output trap_redirect_,
             Latch<Fetch1ThreadInfo>::Input out_,
             std::vector<InputBuffer<Fetch1ThreadInfo>> &next_stage_input_buffer) :
             Named(name_),
             cpu(cpu_),
             nextStageReserve(next_stage_input_buffer),
             inp(inp_),
+            trapRedirect(trap_redirect_),
             out(out_),
             fetchLimit(params.fetch1FetchLimit),
             fetchInfo(params.numThreads),
@@ -104,7 +106,10 @@ namespace gem5
 bool
 Fetch1::checkRedirect(Fetch1ThreadInfo &out_thread)
 {
-    const BranchData &branch = *inp.outputWire;
+    const BranchData &branch = !trapRedirect.outputWire->isBubble() ?
+        *trapRedirect.outputWire : *inp.outputWire;
+
+    bool trap = trapRedirect.outputWire->isBubble();
 
     if (branch.isBubble() || !branch.isStreamChange())
         return false;
@@ -124,7 +129,8 @@ Fetch1::checkRedirect(Fetch1ThreadInfo &out_thread)
     thread.state = PCGenRunning;
     thread.wakeupGuard = true;
     thread.makeValid();
-    advancepc(tid);
+    if(trap)
+        advancepc(tid);
     thread.blocked = !nextStageReserve[tid].canReserve();
     if (!thread.blocked) {
         nextStageReserve[tid].reserve();

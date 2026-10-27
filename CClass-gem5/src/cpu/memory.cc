@@ -17,6 +17,7 @@ Memory::Memory(const std::string &name_, CClassCPU &cpu_,
     Latch<ForwardResultData>::Output in_FBOX_,
     Latch<InstOrderData>::Output in_order_,
     Latch<instorder_pop>::Output in_instorder_pop_,
+    Latch<BranchData>::Output in_trap_redirect_,
     Latch<ForwardResultData>::Input out_COMMON_,
     Latch<ForwardResultData>::Input out_TRAP_,
     Latch<InstOrderData>::Input out_order_,
@@ -32,10 +33,12 @@ Memory::Memory(const std::string &name_, CClassCPU &cpu_,
     in_FBOX(in_FBOX_),
     in_order(in_order_),
     in_instorder_pop(in_instorder_pop_),
+    in_trap_redirect(in_trap_redirect_),
     out_COMMON(out_COMMON_),
     out_TRAP(out_TRAP_),
     out_order(out_order_),
     scoreboard(scoreboard_),
+    forwardDelay(params.executeToMemoryForwardDelay),
     inputBuffer_ORDER(name_ + ".inputBuffer_ORDER",
         params.numFUIDs),
     nextStageReserve_COMMON(nextStageReserve_COMMON_),
@@ -260,6 +263,51 @@ Memory::evaluate()
             *in_MEMORY.outputWire);
     if (!in_order.outputWire->isBubble())
         inputBuffer_ORDER.setTail(*in_order.outputWire);
+
+    const BranchData &trap = *in_trap_redirect.outputWire;
+    const bool takingTrap = trap.reason == BranchData::Trap;
+    if (takingTrap || staleInputCycles != 0) {
+        if (!in_BASE.outputWire->isBubble())
+            inputBuffer_BASE[in_BASE.outputWire->threadId].pushTail();
+        if (!in_MEMORY.outputWire->isBubble())
+            inputBuffer_MEMORY[in_MEMORY.outputWire->threadId].pushTail();
+        if (!in_TRAP.outputWire->isBubble())
+            inputBuffer_TRAP[in_TRAP.outputWire->threadId].pushTail();
+        if (!in_MBOX.outputWire->isBubble())
+            inputBuffer_MBOX[in_MBOX.outputWire->threadId].pushTail();
+        if (!in_FBOX.outputWire->isBubble())
+            inputBuffer_FBOX[in_FBOX.outputWire->threadId].pushTail();
+        if (!in_order.outputWire->isBubble())
+            inputBuffer_ORDER.pushTail();
+
+        for (ThreadID tid = 0; tid < cpu.numThreads; ++tid) {
+            while (!inputBuffer_BASE[tid].empty())
+                popInstInput(tid, inputBuffer_BASE);
+            while (!inputBuffer_MEMORY[tid].empty())
+                popMemInput(tid);
+            while (!inputBuffer_TRAP[tid].empty())
+                popInstInput(tid, inputBuffer_TRAP);
+            while (!inputBuffer_MBOX[tid].empty())
+                popInstInput(tid, inputBuffer_MBOX);
+            while (!inputBuffer_FBOX[tid].empty())
+                popInstInput(tid, inputBuffer_FBOX);
+            if (takingTrap) {
+                memoryInfo[tid] = MemoryThreadInfo();
+                memoryInfo[tid].lastStreamSeqNum = trap.newStreamSeqNum;
+            }
+        }
+        while (!inputBuffer_ORDER.empty())
+            popOrderInput();
+        pop_info = instorder_pop(false, 0);
+        if (takingTrap)
+            staleInputCycles = forwardDelay > 0 ? forwardDelay - 1 : 0;
+        else
+            --staleInputCycles;
+        *out_COMMON.inputWire = ForwardResultData::bubble();
+        *out_TRAP.inputWire = ForwardResultData::bubble();
+        *out_order.inputWire = InstOrderData::bubble();
+        return;
+    }
 
    
 

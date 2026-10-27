@@ -26,7 +26,10 @@ class Writeback : public Named
     Latch<ForwardResultData>::Output in_COMMON;
     Latch<ForwardResultData>::Output in_TRAP;
     Latch<InstOrderData>::Output in_order;
+    Latch<BranchData>::Input out_trap;
     Scoreboard &scoreboard;
+    const unsigned forwardDelay;
+    unsigned staleInputCycles = 0;
 
   public:
     std::vector<InstructionInputBuffer<ForwardResultData>> inputBuffer_COMMON;
@@ -38,6 +41,7 @@ class Writeback : public Named
         Latch<ForwardResultData>::Output in_COMMON_,
         Latch<ForwardResultData>::Output in_TRAP_,
         Latch<InstOrderData>::Output in_order_,
+        Latch<BranchData>::Input out_trap_,
         Scoreboard &scoreboard);
 
     void evaluate();
@@ -63,6 +67,7 @@ class Writeback : public Named
     unsigned int writebackWidth; 
 
     void resetConsumedInputs(ThreadID tid);
+    void handleTrap(ThreadID tid, const CClassDynInstPtr &inst);
       
     static std::string formatCommitTrace(const CClassDynInstPtr &inst, const ExecResult &result);
 };

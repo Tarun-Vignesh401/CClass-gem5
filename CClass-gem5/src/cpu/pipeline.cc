@@ -57,15 +57,19 @@ Pipeline::Pipeline(CClassCPU &cpu_, const BaseCClassCPUParams &params) :
         params.executeToMemoryForwardDelay),
     memOrder(cpu.name() + ".memOrder", "inst_order",
         params.executeToMemoryForwardDelay),
+    wToTrap(cpu.name() + ".wToTrap", "trap"),
     scoreboard(cpu.name() + ".scoreboard",cpu.threads[0]->getIsaPtr()->regClasses()),
     writeback(cpu.name() + ".writeback", cpu, params,
-        mToCOMMON.output(), mToTRAP.output(), memOrder.output(), scoreboard),
+        mToCOMMON.output(), mToTRAP.output(), memOrder.output(),
+        wToTrap.input(), scoreboard),
     memory(cpu.name() + ".memory", cpu, params,
         eToBASE.output(), eToMEMORY.output(), eToTRAP.output(),
         eToMBOX.output(), eToFBOX.output(), instOrder.output(),
         instOrderPop.output(),
+        wToTrap.output(),
         mToCOMMON.input(), mToTRAP.input(),
-        memOrder.input(), scoreboard , writeback.inputBuffer_COMMON,
+        memOrder.input(), scoreboard,
+        writeback.inputBuffer_COMMON,
         writeback.inputBuffer_TRAP),
     execute(cpu.name() + ".execute", cpu, params,
         dToE.output(), eToF1.input(), eToF2.input(), eToD.input(),
@@ -74,12 +78,13 @@ Pipeline::Pipeline(CClassCPU &cpu_, const BaseCClassCPUParams &params) :
         memory.inputBuffer_MEMORY, memory.inputBuffer_TRAP,
         memory.inputBuffer_MBOX, memory.inputBuffer_FBOX,
         memory.inputBuffer_ORDER,
-        instOrder.input(), instOrderPop.input(), scoreboard),
-    decode(cpu.name() + ".decode", cpu, params, eToD.output(),
+        instOrder.input(), instOrderPop.input(), wToTrap.output(), scoreboard),
+    decode(cpu.name() + ".decode", cpu, params, eToD.output(), wToTrap.output(),
         f2ToD.output(), dToE.input(), execute.inputBuffer),
-    fetch2(cpu.name() + ".fetch2", cpu, params, eToF2.output(), f1ToF2.output(),
+    fetch2(cpu.name() + ".fetch2", cpu, params, eToF2.output(),
+        wToTrap.output(), f1ToF2.output(),
         f2ToD.input(),decode.inputBuffer),
-    fetch1(cpu.name() + ".fetch1", cpu, params, eToF1.output(),
+    fetch1(cpu.name() + ".fetch1", cpu, params, eToF1.output(), wToTrap.output(),
         f1ToF2.input(), fetch2.inputBuffer)
     /*activityRecorder(cpu.name() + ".activity", Num_StageId,
       *   The max depth of inter-stage FIFOs 
@@ -186,6 +191,7 @@ Pipeline::evaluate()
     mToCOMMON_MEM.evaluate();
     mToTRAP.evaluate();
     memOrder.evaluate();
+    wToTrap.evaluate();
 
     //fetch2.finaldebugprint();
 

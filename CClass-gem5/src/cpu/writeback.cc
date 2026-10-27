@@ -14,13 +14,16 @@ Writeback::Writeback(const std::string &name_, CClassCPU &cpu_,
     Latch<ForwardResultData>::Output in_COMMON_,
     Latch<ForwardResultData>::Output in_TRAP_,
     Latch<InstOrderData>::Output in_order_,
+    Latch<BranchData>::Input out_trap_,
     Scoreboard &scoreboard_) :
     Named(name_),
     cpu(cpu_),
     in_COMMON(in_COMMON_),
     in_TRAP(in_TRAP_),
     in_order(in_order_),
+    out_trap(out_trap_),
     scoreboard(scoreboard_),
+    forwardDelay(params.executeToMemoryForwardDelay),
     inputBuffer_ORDER(name_ + ".inputBuffer_ORDER",
         params.numFUIDs),
     writebackInfo(params.numThreads),
@@ -115,6 +118,7 @@ Writeback::resetConsumedInputs(ThreadID tid)
 void
 Writeback::evaluate()
 {
+    *out_trap.inputWire = BranchData::bubble();
     if (!in_COMMON.outputWire->isBubble())
         inputBuffer_COMMON[in_COMMON.outputWire->threadId].setTail(
             *in_COMMON.outputWire);
@@ -123,6 +127,26 @@ Writeback::evaluate()
             *in_TRAP.outputWire);
     if (!in_order.outputWire->isBubble())
         inputBuffer_ORDER.setTail(*in_order.outputWire);
+
+    if (staleInputCycles != 0) {
+        if (!in_COMMON.outputWire->isBubble())
+            inputBuffer_COMMON[in_COMMON.outputWire->threadId].pushTail();
+        if (!in_TRAP.outputWire->isBubble())
+            inputBuffer_TRAP[in_TRAP.outputWire->threadId].pushTail();
+        if (!in_order.outputWire->isBubble())
+            inputBuffer_ORDER.pushTail();
+        for (ThreadID tid = 0; tid < cpu.numThreads; ++tid) {
+            while (!inputBuffer_COMMON[tid].empty())
+                popCommonInput(tid);
+            while (!inputBuffer_TRAP[tid].empty())
+                popTrapInput(tid);
+            writebackInfo[tid] = WritebackThreadInfo();
+        }
+        while (!inputBuffer_ORDER.empty())
+            popOrderInput();
+        --staleInputCycles;
+        return;
+    }
     
     unsigned int num_issued = 0;
 
@@ -182,10 +206,8 @@ Writeback::evaluate()
                 DPRINTF(CClassWriteBack,
                     "Writeback saw trap execSeq=%llu\n",
                     inst->id.execSeqNum);
-
-                thread.trapInputIndex++;
-                thread.orderIndex++;
-                moved = true;
+                handleTrap(tid, inst);
+                return;
             }
         }
 
@@ -218,6 +240,39 @@ Writeback::evaluate()
         inputBuffer_TRAP[in_TRAP.outputWire->threadId].pushTail();
     if (!in_order.outputWire->isBubble())
         inputBuffer_ORDER.pushTail();
+}
+
+void
+Writeback::handleTrap(ThreadID tid, const CClassDynInstPtr &inst)
+{
+    if (!in_COMMON.outputWire->isBubble())
+        inputBuffer_COMMON[in_COMMON.outputWire->threadId].pushTail();
+    if (!in_TRAP.outputWire->isBubble())
+        inputBuffer_TRAP[in_TRAP.outputWire->threadId].pushTail();
+    if (!in_order.outputWire->isBubble())
+        inputBuffer_ORDER.pushTail();
+
+    ThreadContext *tc = cpu.getContext(tid);
+    tc->pcState(*inst->pc);
+    inst->fault->invoke(tc, inst->staticInst);
+    scoreboard.clearScoreBoard();
+
+    *out_trap.inputWire = BranchData(BranchData::Trap, tid,
+        inst->id.streamSeqNum + 1, inst->id.predictionSeqNum,
+        tc->pcState(), inst);
+    DPRINTF(CClassWriteBack, "Invoked trap for %s; resume at %s\n",
+        *inst, tc->pcState());
+
+    for (ThreadID i = 0; i < cpu.numThreads; ++i) {
+        while (!inputBuffer_COMMON[i].empty())
+            popCommonInput(i);
+        while (!inputBuffer_TRAP[i].empty())
+            popTrapInput(i);
+        writebackInfo[i] = WritebackThreadInfo();
+    }
+    while (!inputBuffer_ORDER.empty())
+        popOrderInput();
+    staleInputCycles = forwardDelay;
 }
 
 std::string

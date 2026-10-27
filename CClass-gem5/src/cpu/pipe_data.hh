@@ -458,6 +458,7 @@ class BranchData /* : public ReportIF, public BubbleIF */
         SuspendThread,
         /* Branch from an interrupt (no instruction) */
         Interrupt,
+        Trap,
         /* Stop fetching in anticipation of of draining */
         HaltFetch
     };

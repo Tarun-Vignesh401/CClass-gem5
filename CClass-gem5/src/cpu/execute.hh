@@ -31,6 +31,7 @@ class Execute : public Named
 
     /** Input port carrying instructions from Decode */
     Latch<ForwardInstData>::Output inp;
+    Latch<BranchData>::Output in_trap_redirect;
     Latch<BranchData>::Input out_fetch1;
     Latch<BranchData>::Input out_fetch2;
     Latch<BranchData>::Input out_decode;
@@ -167,6 +168,7 @@ class Execute : public Named
         InstSeqNum streamSeqNum;
 
         InstSeqNum lastPredictionSeqNum;
+        bool trapPending = false;
 
         /** State progression for draining NotDraining -> ... -> DrainAllInsts */
         DrainState drainState;
@@ -277,6 +279,7 @@ class Execute : public Named
                  InstructionInputBuffer<InstOrderData> &nextStageReserve_ORDER,
                  Latch<InstOrderData>::Input inst_order_,
                  Latch<instorder_pop>::Input out_instorder_pop_,
+                 Latch<BranchData>::Output in_trap_redirect_,
                 Scoreboard &scoreboard);
 
     ~Execute();

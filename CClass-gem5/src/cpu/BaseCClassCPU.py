@@ -219,7 +219,7 @@ class BaseCClassCPU(BaseCPU):
         " Decode's own width)")
     executeInputBufferLimit =  Param.Unsigned(7,
         "Width (in instructions) of input from exec to mem")
-    executeIssueLimit = Param.Unsigned(2,
+    executeIssueLimit = Param.Unsigned(1,
         "No. of Instructions that can be issued to FU's at once")
     executeFuncUnits = Param.CClassFUPool(
         CClassDefaultFUPool(), "FUlines for this processor"

@@ -20,6 +20,7 @@ class Decode : public Named {
 
 protected:
     Latch<BranchData>::Output branch;
+    Latch<BranchData>::Output trapRedirect;
     Latch<ForwardLineData>::Output inp;
     Latch<ForwardInstData>::Input out;
     std::vector<InputBuffer<ForwardInstData>> &nextStageReserve;
@@ -111,6 +112,7 @@ public:
         CClassCPU &cpu_,
         const BaseCClassCPUParams &params,
         Latch<BranchData>::Output branch_,
+        Latch<BranchData>::Output trap_redirect_,
         Latch<ForwardLineData>::Output inp_,
         Latch<ForwardInstData>::Input out_,
         std::vector<InputBuffer<ForwardInstData>> &next_stage_input_buffer);

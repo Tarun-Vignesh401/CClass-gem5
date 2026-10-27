@@ -471,6 +471,9 @@ operator <<(std::ostream &os, BranchData::Reason reason)
       case BranchData::Interrupt:
         os << "Interrupt";
         break;
+      case BranchData::Trap:
+        os << "Trap";
+        break;
       case BranchData::SuspendThread:
         os << "SuspendThread";
         break;
@@ -502,6 +505,7 @@ BranchData::isStreamChange(const BranchData::Reason reason)
       case BadlyPredictedBranch:
       case SuspendThread:
       case Interrupt:
+      case Trap:
       case HaltFetch:
         ret = true;
         break;
@@ -522,6 +526,7 @@ BranchData::isBranch(const BranchData::Reason reason)
       case CorrectlyPredictedBranch:
       case SuspendThread:
       case Interrupt:
+      case Trap:
       case HaltFetch:
         ret = false;
         break;

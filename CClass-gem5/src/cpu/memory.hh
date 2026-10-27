@@ -32,11 +32,14 @@ class Memory : public Named
     Latch<ForwardResultData>::Output in_FBOX;
     Latch<InstOrderData>::Output in_order;
     Latch<instorder_pop>::Output in_instorder_pop;
+    Latch<BranchData>::Output in_trap_redirect;
 
     Latch<ForwardResultData>::Input out_COMMON;
     Latch<ForwardResultData>::Input out_TRAP;
     Latch<InstOrderData>::Input out_order;
     Scoreboard &scoreboard;
+    const unsigned forwardDelay;
+    unsigned staleInputCycles = 0;
 
   public:
     std::vector<InstructionInputBuffer<ForwardMemData>> inputBuffer_MEMORY;
@@ -55,6 +58,7 @@ class Memory : public Named
         Latch<ForwardResultData>::Output in_FBOX,
         Latch<InstOrderData>::Output in_order,
         Latch<instorder_pop>::Output in_instorder_pop,
+        Latch<BranchData>::Output in_trap_redirect,
         Latch<ForwardResultData>::Input out_COMMON,
         Latch<ForwardResultData>::Input out_TRAP,
         Latch<InstOrderData>::Input out_order,
