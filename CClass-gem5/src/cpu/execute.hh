@@ -86,6 +86,18 @@ class Execute : public Named
 
     std::vector<FUPipeline *> funcUnits;
 
+    enum class OutputBuffer
+    {
+        Base,
+        Memory,
+        Trap,
+        Mbox,
+        Fbox
+    };
+
+    std::map<std::pair<ThreadID, InstSeqNum>, std::vector<OutputBuffer>>
+        outputReservations;
+
     // the execseqnum of the fence instructions
     //std::vector<InstSeqNum> lastMemBarrier;
 
@@ -189,8 +201,6 @@ class Execute : public Named
      *  is no data. */
     const ForwardInstData *getInput(ThreadID tid);
 
-    bool findIsbifFree(ThreadID tid, CClassDynInstPtr inst);
-
      /** Pop an element off the input buffer, if there are any */
     void popInput(ThreadID tid);
 
@@ -206,6 +216,16 @@ class Execute : public Named
     bool handleBranch(ThreadID tid, CClassDynInstPtr inst);
 
     void SetStalls(ThreadID tid);
+
+    Reservable &outputBuffer(ThreadID tid, OutputBuffer buffer);
+    OutputBuffer primaryOutput(CClassDynInstPtr inst) const;
+    bool reserveOutputsForIssue(ThreadID tid, CClassDynInstPtr inst);
+    bool hasOutputReservation(ThreadID tid, CClassDynInstPtr inst,
+        OutputBuffer buffer) const;
+    bool consumeOutputReservation(ThreadID tid, CClassDynInstPtr inst,
+        OutputBuffer buffer);
+    void releaseOutputReservations(ThreadID tid, InstSeqNum seq_num);
+    void releaseAllOutputReservations(ThreadID tid);
 
 
     //void issuedMemBarrierInst(CClassDynInstPtr inst);

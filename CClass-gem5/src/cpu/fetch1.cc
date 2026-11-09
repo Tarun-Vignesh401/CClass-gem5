@@ -109,7 +109,7 @@ Fetch1::checkRedirect(Fetch1ThreadInfo &out_thread)
     const BranchData &branch = !trapRedirect.outputWire->isBubble() ?
         *trapRedirect.outputWire : *inp.outputWire;
 
-    bool trap = trapRedirect.outputWire->isBubble();
+    bool nottrap = trapRedirect.outputWire->isBubble();
 
     if (branch.isBubble() || !branch.isStreamChange())
         return false;
@@ -129,13 +129,25 @@ Fetch1::checkRedirect(Fetch1ThreadInfo &out_thread)
     thread.state = PCGenRunning;
     thread.wakeupGuard = true;
     thread.makeValid();
-    if(trap)
+    // branch is not already at the target.
+    if(nottrap){
         advancepc(tid);
+    }
+    // 2-byte aligned pc's are possible after redirection..
+    // please don't wonder why are we sending 4-byte aligned addresses ;(
+    /*
+    if (thread.pc->instAddr() % 4 == 2)
+        thread.pc->set(thread.pc->instAddr() + 2);
+    */
+       
+    
     thread.blocked = !nextStageReserve[tid].canReserve();
     if (!thread.blocked) {
         nextStageReserve[tid].reserve();
         processResponse(out_thread, thread); // sends target PC once
         advancepc(tid);                      // private Fetch1 PC -> successor
+        //if(!nottrap && thread.pc->instAddr() % 4 == 2)
+        //    advancepc(tid);
     } else {
         DPRINTF(CClassFetch1,
             "Redirect target stalled: tid=%d target=%#lx Fetch1->Fetch2 "

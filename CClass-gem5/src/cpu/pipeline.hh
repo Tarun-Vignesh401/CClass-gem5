@@ -39,6 +39,8 @@ class Pipeline : public Ticked
   protected:
     CClassCPU &cpu;
 
+    void transferLatchInputs();
+
     /** Allow cycles to be skipped when the pipeline is idle */
     //bool allow_idling;
 

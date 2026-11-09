@@ -78,10 +78,6 @@ Decode::evaluate(){
     if (checkRedirect())
         return;
 
-    
-if (!inp.outputWire->isBubble())
-        inputBuffer[inp.outputWire->id.threadId].setTail(*inp.outputWire);
-        
     ForwardInstData &insts_out = *out.inputWire;
     
 
@@ -391,8 +387,6 @@ if (!inp.outputWire->isBubble())
     }
 
 
-    if (!inp.outputWire->isBubble())
-        inputBuffer[inp.outputWire->id.threadId].pushTail();
 }
 
 bool
@@ -406,11 +400,6 @@ Decode::checkRedirect()
 
     DPRINTF(CClassDecode, "Decode saw branch data: %s\n", branch_data);
 
-     /* reservation has not been freed yet this ensures we are doing it properly*/
-   if (!inp.outputWire->isBubble()){
-        inputBuffer[inp.outputWire->id.threadId].setTail(*inp.outputWire);
-        inputBuffer[inp.outputWire->id.threadId].pushTail();
-    }
     for (ThreadID tid = 0; tid < cpu.numThreads; tid++) {
         while (!inputBuffer[tid].empty())
             popInput(tid);

@@ -246,40 +246,9 @@ Memory::resetConsumedInputs(ThreadID tid)
 void
 Memory::evaluate()
 {
-    if (!in_BASE.outputWire->isBubble())
-        inputBuffer_BASE[in_BASE.outputWire->threadId].setTail(
-            *in_BASE.outputWire);
-    if (!in_TRAP.outputWire->isBubble())
-        inputBuffer_TRAP[in_TRAP.outputWire->threadId].setTail(
-            *in_TRAP.outputWire);
-    if (!in_MBOX.outputWire->isBubble())
-        inputBuffer_MBOX[in_MBOX.outputWire->threadId].setTail(
-            *in_MBOX.outputWire);
-    if (!in_FBOX.outputWire->isBubble())
-        inputBuffer_FBOX[in_FBOX.outputWire->threadId].setTail(
-            *in_FBOX.outputWire);
-    if (!in_MEMORY.outputWire->isBubble())
-        inputBuffer_MEMORY[in_MEMORY.outputWire->threadId].setTail(
-            *in_MEMORY.outputWire);
-    if (!in_order.outputWire->isBubble())
-        inputBuffer_ORDER.setTail(*in_order.outputWire);
-
     const BranchData &trap = *in_trap_redirect.outputWire;
     const bool takingTrap = trap.reason == BranchData::Trap;
     if (takingTrap || staleInputCycles != 0) {
-        if (!in_BASE.outputWire->isBubble())
-            inputBuffer_BASE[in_BASE.outputWire->threadId].pushTail();
-        if (!in_MEMORY.outputWire->isBubble())
-            inputBuffer_MEMORY[in_MEMORY.outputWire->threadId].pushTail();
-        if (!in_TRAP.outputWire->isBubble())
-            inputBuffer_TRAP[in_TRAP.outputWire->threadId].pushTail();
-        if (!in_MBOX.outputWire->isBubble())
-            inputBuffer_MBOX[in_MBOX.outputWire->threadId].pushTail();
-        if (!in_FBOX.outputWire->isBubble())
-            inputBuffer_FBOX[in_FBOX.outputWire->threadId].pushTail();
-        if (!in_order.outputWire->isBubble())
-            inputBuffer_ORDER.pushTail();
-
         for (ThreadID tid = 0; tid < cpu.numThreads; ++tid) {
             while (!inputBuffer_BASE[tid].empty())
                 popInstInput(tid, inputBuffer_BASE);
@@ -560,20 +529,6 @@ Memory::evaluate()
     //resetConsumedInputs(tid);
 
     *out_order.inputWire = issued_order;
-    /*
-    if (!in_BASE.outputWire->isBubble())
-        inputBuffer_BASE[in_BASE.outputWire->threadId].pushTail();
-    if (!in_TRAP.outputWire->isBubble())
-        inputBuffer_TRAP[in_TRAP.outputWire->threadId].pushTail();
-    if (!in_MBOX.outputWire->isBubble())
-        inputBuffer_MBOX[in_MBOX.outputWire->threadId].pushTail();
-    if (!in_FBOX.outputWire->isBubble())
-        inputBuffer_FBOX[in_FBOX.outputWire->threadId].pushTail();
-    if (!in_MEMORY.outputWire->isBubble())
-        inputBuffer_MEMORY[in_MEMORY.outputWire->threadId].pushTail();
-    if (!in_order.outputWire->isBubble())
-        inputBuffer_ORDER.pushTail();
-    */
 }
 
 

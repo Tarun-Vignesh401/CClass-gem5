@@ -20,6 +20,21 @@ namespace gem5
 namespace cclass
 {
 
+namespace
+{
+
+template <class Buffer, class Data>
+void
+transferLatchInput(Buffer &buffer, Data &data)
+{
+    if (!data.isBubble()) {
+        buffer.setTail(data);
+        buffer.pushTail();
+    }
+}
+
+} // anonymous namespace
+
 Pipeline::Pipeline(CClassCPU &cpu_, const BaseCClassCPUParams &params) :
     Ticked(cpu_,&(cpu_.BaseCPU::baseStats.numCycles)),
     cpu(cpu_),
@@ -141,34 +156,71 @@ Pipeline::minorTrace() const
 */
 
 void
+Pipeline::transferLatchInputs()
+{
+    auto &fetch1_info = *f1ToF2.output().outputWire;
+    if (!fetch1_info.isBubble())
+        transferLatchInput(fetch2.inputBuffer[fetch1_info.tid], fetch1_info);
+
+    auto &line = *f2ToD.output().outputWire;
+    if (!line.isBubble())
+        transferLatchInput(decode.inputBuffer[line.id.threadId], line);
+
+    auto &insts = *dToE.output().outputWire;
+    if (!insts.isBubble())
+        transferLatchInput(execute.inputBuffer[insts.threadId], insts);
+
+    auto &base = *eToBASE.output().outputWire;
+    if (!base.isBubble())
+        transferLatchInput(memory.inputBuffer_BASE[base.threadId], base);
+
+    auto &mem = *eToMEMORY.output().outputWire;
+    if (!mem.isBubble())
+        transferLatchInput(memory.inputBuffer_MEMORY[mem.threadId], mem);
+
+    auto &trap = *eToTRAP.output().outputWire;
+    if (!trap.isBubble())
+        transferLatchInput(memory.inputBuffer_TRAP[trap.threadId], trap);
+
+    auto &mbox = *eToMBOX.output().outputWire;
+    if (!mbox.isBubble())
+        transferLatchInput(memory.inputBuffer_MBOX[mbox.threadId], mbox);
+
+    auto &fbox = *eToFBOX.output().outputWire;
+    if (!fbox.isBubble())
+        transferLatchInput(memory.inputBuffer_FBOX[fbox.threadId], fbox);
+
+    auto &execute_order = *instOrder.output().outputWire;
+    if (!execute_order.isBubble())
+        transferLatchInput(memory.inputBuffer_ORDER, execute_order);
+
+    auto &common = *mToCOMMON.output().outputWire;
+    if (!common.isBubble())
+        transferLatchInput(writeback.inputBuffer_COMMON[common.threadId], common);
+
+    auto &writeback_trap = *mToTRAP.output().outputWire;
+    if (!writeback_trap.isBubble())
+        transferLatchInput(writeback.inputBuffer_TRAP[writeback_trap.threadId],
+            writeback_trap);
+
+    auto &memory_order = *memOrder.output().outputWire;
+    if (!memory_order.isBubble())
+        transferLatchInput(writeback.inputBuffer_ORDER, memory_order);
+}
+
+void
 Pipeline::evaluate()
 {   
     /** We tick the CPU to update the BaseCPU cycle counters */
     cpu.tick();
-    /* Note that it's important to evaluate the stages in order to allow
-     *  'immediate', 0-time-offset TimeBuffer activity to be visible from
-     *  later stages to earlier ones in the same cycle */
-    //execute.evaluate();
-    /*
-    fetch1.evaluate();
-    //std::cout<<"I am in fetch1!\n";
-
-    fetch2.evaluate();
-    //std::cout<<"I am in fetch2!!\n";
-
-    decode.evaluate();
-     //std::cout<<"I am in decode !!\n";
-
-    execute.evaluate();
-    memory.evaluate();
-    writeback.evaluate();
-    */
-   writeback.evaluate();
-   memory.evaluate();
-   execute.evaluate();
-   decode.evaluate();
-   fetch2.evaluate();
+    transferLatchInputs();
+    /* Latch outputs are queued before stages consume inputs. */
    fetch1.evaluate();
+   fetch2.evaluate();
+   decode.evaluate();
+   execute.evaluate();
+   memory.evaluate();
+   writeback.evaluate();
 
     //std::cout << "current cycle : " << cpu.curCycle() << "\n";
     /*if (debug::MinorTrace)

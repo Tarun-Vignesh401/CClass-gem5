@@ -395,10 +395,6 @@ Fetch2::evaluate(){
             numFetchesInMemorySystem);
     }
 
-    if (!in_thread.outputWire->isBubble()){
-        inputBuffer[fetch_tid].setTail(*in_thread.outputWire);
-        DPRINTF(CClassFetch2,"you have set to the inputBuffer !!\n");
-    }
 if(fetch2_thread)
 {   
     //DPRINTF(CClassFetch2, "fetch2 is evaluating thread %d\n", fetch_tid);
@@ -468,11 +464,6 @@ if(fetch2_thread)
     }
       
 }//if(thread)...
-if (!in_thread.outputWire->isBubble()){
-        DPRINTF(CClassFetch2,"you have pushed to the inputBuffer !!\n");
-        inputBuffer[fetch_tid].pushTail();
-        
-}
 }
 
 
@@ -551,12 +542,6 @@ Fetch2::checkRedirect()
     streamSeqNum[tid] = branch_data.newStreamSeqNum;
     predictionSeqNum[tid] = branch_data.newPredictionSeqNum;
 
-
-    /* reservation has not been freed yet this ensures we are doing it properly*/
-    if (!in_thread.outputWire->isBubble()){
-        inputBuffer[tid].setTail(*in_thread.outputWire);
-        inputBuffer[tid].pushTail();
-    }
 
     while (!inputBuffer[tid].empty())
       inputBuffer[tid].pop();

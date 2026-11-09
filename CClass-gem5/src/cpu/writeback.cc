@@ -119,22 +119,8 @@ void
 Writeback::evaluate()
 {
     *out_trap.inputWire = BranchData::bubble();
-    if (!in_COMMON.outputWire->isBubble())
-        inputBuffer_COMMON[in_COMMON.outputWire->threadId].setTail(
-            *in_COMMON.outputWire);
-    if (!in_TRAP.outputWire->isBubble())
-        inputBuffer_TRAP[in_TRAP.outputWire->threadId].setTail(
-            *in_TRAP.outputWire);
-    if (!in_order.outputWire->isBubble())
-        inputBuffer_ORDER.setTail(*in_order.outputWire);
 
     if (staleInputCycles != 0) {
-        if (!in_COMMON.outputWire->isBubble())
-            inputBuffer_COMMON[in_COMMON.outputWire->threadId].pushTail();
-        if (!in_TRAP.outputWire->isBubble())
-            inputBuffer_TRAP[in_TRAP.outputWire->threadId].pushTail();
-        if (!in_order.outputWire->isBubble())
-            inputBuffer_ORDER.pushTail();
         for (ThreadID tid = 0; tid < cpu.numThreads; ++tid) {
             while (!inputBuffer_COMMON[tid].empty())
                 popCommonInput(tid);
@@ -234,24 +220,11 @@ Writeback::evaluate()
         //thread.orderIndex);
     }
 
-    if (!in_COMMON.outputWire->isBubble())
-        inputBuffer_COMMON[in_COMMON.outputWire->threadId].pushTail();
-    if (!in_TRAP.outputWire->isBubble())
-        inputBuffer_TRAP[in_TRAP.outputWire->threadId].pushTail();
-    if (!in_order.outputWire->isBubble())
-        inputBuffer_ORDER.pushTail();
 }
 
 void
 Writeback::handleTrap(ThreadID tid, const CClassDynInstPtr &inst)
 {
-    if (!in_COMMON.outputWire->isBubble())
-        inputBuffer_COMMON[in_COMMON.outputWire->threadId].pushTail();
-    if (!in_TRAP.outputWire->isBubble())
-        inputBuffer_TRAP[in_TRAP.outputWire->threadId].pushTail();
-    if (!in_order.outputWire->isBubble())
-        inputBuffer_ORDER.pushTail();
-
     ThreadContext *tc = cpu.getContext(tid);
     tc->pcState(*inst->pc);
     inst->fault->invoke(tc, inst->staticInst);
