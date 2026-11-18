@@ -57,7 +57,12 @@ CClassDynInst::isLastOpInInst() const
 bool
 CClassDynInst::isNoCostInst() const
 {
-    return isInst() && staticInst->opClass() == No_OpClass;
+    // No_OpClass describes functional-unit timing, not whether an
+    // instruction has architectural effects. Non-speculative instructions
+    // (for example CSR accesses and semihosting ebreaks) must execute through
+    // the normal path even though they have no functional-unit class.
+    return isInst() && staticInst->opClass() == No_OpClass &&
+        !staticInst->isNonSpeculative();
 }
 
 void
