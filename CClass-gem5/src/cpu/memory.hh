@@ -93,6 +93,8 @@ class Memory : public Named
     bool pushTrap(ThreadID tid, const ExecResult &result);
 
     unsigned int memoryIssueLimit;
+    
+    void checkIfBuffersblocked(ThreadID tid);
 
     void resetConsumedInputs(ThreadID tid);
     
@@ -114,6 +116,8 @@ class Memory : public Named
       unsigned int trapOutputIndex = 0;
 
       InstSeqNum lastStreamSeqNum = 1;
+      bool blocked_Common = false; 
+      bool blocked_Trap = false;
 
       bool isStreamed(){
         if(order_index == order.width())return true;

@@ -209,8 +209,8 @@ class BaseCClassCPU(BaseCPU):
     decodeToExecuteForwardDelay = Param.Cycles(1, "reserved for later stages")
     executeBranchDelay = Param.Cycles(1, "reserved for later execute redirect")
     fetch2InputBufferSize = Param.Unsigned(2, "Size of input buffer to Fetch2 in cycles-worth of insts.")
-    decodeInputBufferSize = Param.Unsigned(3, "Size of input buffer to Decode in cycles-worth of insts.")
-    executeInputBufferSize = Param.Unsigned(3, "Size of input buffer to Decode in cycles-worth of insts.")
+    decodeInputBufferSize = Param.Unsigned(2, "Size of input buffer to Decode in cycles-worth of insts.")
+    executeInputBufferSize = Param.Unsigned(1, "Size of input buffer to Decode in cycles-worth of insts.")
     decodeCycleInput = Param.Bool(True,
         "Allow Fetch2 to cross input lines to generate full output each"
         " cycle")
@@ -230,7 +230,7 @@ class BaseCClassCPU(BaseCPU):
     memoryIssueLimit = Param.Unsigned(1, "No. of instructions the memory stage is capable of polling ")
     numFUIDs = Param.Unsigned(30, "no. of instruction fuid's that can be stored")
     writebackWidth = Param.Unsigned(1, "No. of instructions retired in one cycle")
-    memoryInputBufferSize = Param.Unsigned(3,"Size of inputBuffer from Execute")
+    memoryInputBufferSize = Param.Unsigned(2,"Size of inputBuffer from Execute")
     def addCheckerCpu(self):
         print("Checker not supported by CClassCPU")
         exit(1)

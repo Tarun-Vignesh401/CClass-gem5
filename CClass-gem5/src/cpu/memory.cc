@@ -121,6 +121,9 @@ Memory::pushCommon(ThreadID tid, const ExecResult &result)
     MemoryThreadInfo &thread = memoryInfo[tid];
     unsigned int index = thread.commonOutputIndex;
 
+    if(thread.blocked_Common)
+        return false;
+    
     if (index >= MAX_FORWARD_INSTS)
         return false;
 
@@ -172,6 +175,9 @@ Memory::pushTrap(ThreadID tid, const ExecResult &result)
     CClassDynInstPtr inst = result.inst;
     MemoryThreadInfo &thread = memoryInfo[tid];
     unsigned int index = thread.trapOutputIndex;
+
+    if(thread.blocked_Trap)
+        return false;
 
 
     if (index >= MAX_FORWARD_INSTS)
@@ -345,6 +351,7 @@ Memory::evaluate()
                             thread.baseInputIndex++;
                             thread.order_index++;
                             thread.commonOutputIndex++;
+                            checkIfBuffersblocked(tid);
                         }
                     }
                 }
@@ -377,6 +384,7 @@ Memory::evaluate()
                             thread.trapInputIndex++;
                             thread.order_index++;
                             thread.trapOutputIndex++;
+                            checkIfBuffersblocked(tid);
                         }
                 }
             }
@@ -410,6 +418,7 @@ Memory::evaluate()
                             thread.order_index++;
                             thread.commonOutputIndex++;
                             moved = true;
+                            checkIfBuffersblocked(tid);
                         }
                     }
                 }
@@ -442,6 +451,7 @@ Memory::evaluate()
                             thread.order_index++;
                             thread.commonOutputIndex++;
                             moved = true;
+                            checkIfBuffersblocked(tid);
                         }
                 }
                 }
@@ -480,6 +490,7 @@ Memory::evaluate()
                             thread.memoryInputIndex++;
                             thread.order_index++;
                             thread.trapOutputIndex++;
+                            checkIfBuffersblocked(tid);
                         }// fault handling block
                     } else if (request->complete()) {
                         PacketPtr packet = request->packet;
@@ -493,6 +504,7 @@ Memory::evaluate()
                             thread.order_index++;
                             thread.commonOutputIndex++;
                             moved = true;
+                            checkIfBuffersblocked(tid);
                         }// normal handling block
                     /* checked if the dcache request is complete or not*/
                     } else {
@@ -520,6 +532,7 @@ Memory::evaluate()
         inst_mbox = getInstInput(tid, inputBuffer_MBOX);
         inst_fbox = getInstInput(tid, inputBuffer_FBOX);
         inst_mem = getMemInput(tid);
+        
     }
 
     if (order && order->isBubble())
@@ -527,9 +540,19 @@ Memory::evaluate()
     
     /*Popping Mem-Exe ISB's here and resetting the sequence numbers */
     //resetConsumedInputs(tid);
+    checkIfBuffersblocked(tid);
+
 
     *out_order.inputWire = issued_order;
 }
+
+void
+Memory::checkIfBuffersblocked(ThreadID tid){
+       memoryInfo[tid].blocked_Common = !nextStageReserve_COMMON[tid].canReserve();
+       memoryInfo[tid].blocked_Trap = !nextStageReserve_TRAP[tid].canReserve();
+}
+
+
 
 
 
